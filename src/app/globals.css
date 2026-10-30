@@ -4,18 +4,19 @@
   --font-inter: 'Inter', sans-serif;
   --font-display: var(--font-fraunces);
 
-  --color-background: oklch(15% 0.008 60);
-  --color-background-2: oklch(18% 0.010 60);
-  --color-surface: oklch(20% 0.010 60);
-  --color-surface-2: oklch(24% 0.012 60);
-  --color-primary: oklch(94% 0.012 75);
-  --color-secondary: oklch(69% 0.015 60);
-  --color-accent: oklch(72% 0.11 28);
-  --color-accent-hi: oklch(80% 0.09 30);
-  --color-accent-dim: oklch(72% 0.11 28 / 0.14);
-  --color-success: oklch(72% 0.15 150);
-  --color-border-subtle: oklch(94% 0.012 75 / 0.09);
-  --color-border-strong: oklch(94% 0.012 75 / 0.16);
+  /* Light theme - warm ivory background with black text */
+  --color-background: oklch(97% 0.008 85);
+  --color-background-2: oklch(95% 0.006 85);
+  --color-surface: oklch(98% 0.004 85);
+  --color-surface-2: oklch(96% 0.006 85);
+  --color-primary: oklch(12% 0.008 85);
+  --color-secondary: oklch(45% 0.008 85);
+  --color-accent: oklch(72% 0.12 25);
+  --color-accent-hi: oklch(75% 0.10 25);
+  --color-accent-dim: oklch(72% 0.12 25 / 0.14);
+  --color-success: oklch(65% 0.15 145);
+  --color-border-subtle: oklch(12% 0.008 85 / 0.08);
+  --color-border-strong: oklch(12% 0.008 85 / 0.12);
 }
 
 @layer base {
@@ -23,7 +24,7 @@
     background-color: var(--color-background);
     color: var(--color-primary);
     font-family: var(--font-inter);
-    color-scheme: dark;
+    color-scheme: light;
   }
 }
 
@@ -62,10 +63,10 @@ input:focus-visible,
 
 /* ============ Animation / effect primitives ============ */
 @layer components {
-  /* Dark listening-room shell: radial wash behind the stage */
+  /* Light listening-room shell: warm radial wash behind the stage */
   .app-shell {
     background:
-      radial-gradient(120% 90% at 50% -10%, oklch(22% 0.02 70 / 0.6), transparent 55%),
+      radial-gradient(120% 90% at 50% -10%, oklch(95% 0.008 85 / 0.6), transparent 55%),
       var(--color-background);
   }
 
@@ -75,13 +76,13 @@ input:focus-visible,
     inset: 0;
     border-radius: 50%;
     background:
-      repeating-radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 9px),
-      radial-gradient(circle at 50% 50%, oklch(22% 0.008 60) 0 38%, oklch(12% 0.006 60) 70%, oklch(9% 0.005 60) 100%);
+      repeating-radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.06) 0 1px, transparent 1px 9px),
+      radial-gradient(circle at 50% 50%, oklch(35% 0.008 70) 0 38%, oklch(25% 0.006 70) 70%, oklch(18% 0.005 70) 100%);
     box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.05),
-      0 26px 60px -18px rgba(0, 0, 0, 0.7),
-      0 0 0 1px oklch(72% 0.11 28 / 0.3),
-      0 0 36px 5px oklch(72% 0.11 28 / 0.16);
+      inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 26px 60px -18px rgba(0, 0, 0, 0.25),
+      0 0 0 1px oklch(72% 0.12 25 / 0.15),
+      0 0 36px 5px oklch(72% 0.12 25 / 0.08);
     will-change: transform;
     animation: amply-spin 9s linear infinite;
   }
@@ -91,8 +92,8 @@ input:focus-visible,
     inset: 0;
     border-radius: 50%;
     background:
-      radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.07), transparent 34%),
-      conic-gradient(from 210deg, transparent 0deg, rgba(255, 255, 255, 0.025) 30deg, transparent 80deg);
+      radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.12), transparent 34%),
+      conic-gradient(from 210deg, transparent 0deg, rgba(0, 0, 0, 0.02) 30deg, transparent 80deg);
   }
   .vinyl-label {
     position: absolute;
@@ -102,8 +103,8 @@ input:focus-visible,
     aspect-ratio: 1;
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: oklch(26% 0.02 70);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: oklch(85% 0.008 85);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     display: grid;
     place-items: center;
   }
@@ -112,7 +113,7 @@ input:focus-visible,
     width: 12%;
     aspect-ratio: 1;
     border-radius: 50%;
-    background: oklch(9% 0.005 60);
+    background: oklch(18% 0.005 70);
   }
   [data-paused="true"] .vinyl {
     animation-play-state: paused;
@@ -157,7 +158,7 @@ input:focus-visible,
     width: 820px;
     height: 820px;
     transform: translate(-50%, -50%);
-    background: radial-gradient(circle, oklch(40% 0.05 70 / 0.14), transparent 62%);
+    background: radial-gradient(circle, oklch(90% 0.04 70 / 0.2), transparent 62%);
     border-radius: 50%;
     pointer-events: none;
   }
@@ -169,11 +170,12 @@ input:focus-visible,
     height: 52%;
     pointer-events: none;
     filter: blur(70px);
-    opacity: 0.9;
+    opacity: 0.8;
     background:
-      radial-gradient(42% 62% at 20% 92%, oklch(70% 0.11 28 / 0.22), transparent 70%),
-      radial-gradient(38% 58% at 58% 100%, oklch(55% 0.10 350 / 0.20), transparent 70%),
-      radial-gradient(40% 60% at 86% 84%, oklch(48% 0.09 20 / 0.18), transparent 70%);
+      radial-gradient(42% 62% at 20% 92%, oklch(72% 0.12 25 / 0.35), transparent 70%),
+      radial-gradient(38% 58% at 58% 100%, oklch(65% 0.14 320 / 0.3), transparent 70%),
+      radial-gradient(40% 60% at 86% 84%, oklch(60% 0.10 280 / 0.25), transparent 70%),
+      radial-gradient(35% 55% at 40% 100%, oklch(55% 0.08 200 / 0.2), transparent 65%);
   }
 
   /* ---- Eyebrow label divider lines ---- */

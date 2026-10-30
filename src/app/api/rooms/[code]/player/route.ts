@@ -31,21 +31,13 @@ export async function POST(
       room.isPlaying = true;
     } else if (action === "pause") {
       room.isPlaying = false;
-    } else if (action === "next") {
-      if (room.currentSongIndex < room.queue.length - 1) {
-        room.currentSongIndex += 1;
-        room.progress = 0;
-        room.isPlaying = true;
-      } else {
-        room.isPlaying = false;
-      }
-    } else if (action === "previous") {
-      if (room.currentSongIndex > 0) {
-        room.currentSongIndex -= 1;
-        room.progress = 0;
-        room.isPlaying = true;
-      }
     }
+    // NOTE: "next" and "previous" are handled authoritatively by the Socket.IO
+    // handlers in server.js, which update room state AND broadcast PLAYBACK_COMMAND
+    // to guests. The API route intentionally does NOT process these actions to
+    // avoid double-incrementing the revision or double-mutating song index.
+    // The Socket.IO path fires first (synchronous emit) and the API POST is
+    // a persistence/fallback that only matters when Socket.IO is unavailable.
 
     if (progress !== undefined) {
       room.progress = progress;

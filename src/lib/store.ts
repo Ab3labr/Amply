@@ -16,6 +16,8 @@ export interface RoomData {
   progress: number;
   createdAt: number;
   lastActivity: number;
+  /** Monotonically increasing revision for playback-affecting commands. */
+  revision: number;
 }
 
 const globalForStore = global as unknown as {

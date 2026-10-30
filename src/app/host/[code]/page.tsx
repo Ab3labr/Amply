@@ -184,7 +184,21 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
   }, [code, router]);
 
   return (
-    <div className="app-shell flex min-h-dvh flex-col bg-background lg:h-dvh lg:overflow-hidden">
+    <div className="app-shell flex min-h-dvh flex-col bg-background lg:h-dvh lg:overflow-hidden relative">
+      {/* Film grain overlay */}
+      <div className="grain" />
+      {/* Rich landscape gradient background */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: `
+          linear-gradient(to bottom, oklch(97% 0.008 85) 0%, oklch(95% 0.006 85) 50%, transparent 80%),
+          radial-gradient(ellipse 120% 80% at 50% 120%, oklch(72% 0.12 25 / 0.5), transparent 50%),
+          radial-gradient(ellipse 100% 60% at 20% 120%, oklch(65% 0.18 28 / 0.4), transparent 45%),
+          radial-gradient(ellipse 90% 50% at 80% 120%, oklch(60% 0.10 320 / 0.35), transparent 40%),
+          radial-gradient(ellipse 80% 40% at 40% 120%, oklch(70% 0.14 280 / 0.3), transparent 35%),
+          radial-gradient(ellipse 70% 30% at 60% 120%, oklch(55% 0.08 200 / 0.25), transparent 30%),
+          oklch(97% 0.008 85)
+        `
+      }} />
       <Toast />
       <Topbar code={code} members={roomState?.members || []} onLeave={() => router.push("/")} />
 

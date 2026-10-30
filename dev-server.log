@@ -1,0 +1,13 @@
+
+> amply@0.1.0 dev
+> node server.js
+
+✓ Running next.config.ts took 288ms
+[SERVER 2026-10-24T09:55:16.923Z] Ready at http://localhost:3000 
+[SERVER 2026-10-24T09:55:16.924Z]   Host:   http://localhost:3000/experiment/host 
+[SERVER 2026-10-24T09:55:16.924Z]   Client: http://localhost:3000/experiment/client 
+ GET / 200 in 643ms (next.js: 436ms, application-code: 207ms)
+ GET / 200 in 292ms (next.js: 12ms, application-code: 280ms)
+ GET / 200 in 151ms (next.js: 12ms, application-code: 140ms)
+ HEAD / 200 in 166ms (next.js: 44ms, application-code: 122ms)
+ GET / 200 in 52ms (next.js: 9ms, application-code: 43ms)

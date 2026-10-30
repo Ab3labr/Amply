@@ -11,6 +11,15 @@ const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+// ── Shared in-memory room store ────────────────────────────────────────────
+// Must match the pattern in src/lib/store.ts exactly so both the Next.js API
+// routes (TypeScript) and this custom server (CommonJS) share the SAME Map.
+const globalForStore = global;
+if (!globalForStore.rooms) {
+  globalForStore.rooms = new Map();
+}
+const roomsStore = globalForStore.rooms;
+
 // ── Experiment state ──────────────────────────────────────────────────────
 // Tracks all connected clients for the current session.
 const experimentState = {
@@ -92,6 +101,92 @@ app.prepare().then(() => {
       const broadcastAt = Date.now();
       socket.to(roomCode).emit('SEEK', { roomCode, position, timestamp, seq, serverSentAt: broadcastAt });
       diag('SERVER', roomCode, 'SEEK', 'broadcast', { seq: seq ?? null, position: position ?? null, serverSentAt: broadcastAt });
+    });
+
+    // ─── NEXT ──────────────────────────────────────────────────────────────
+    // Host requests next track. Server updates room state and broadcasts a
+    // timeline command so guests can switch deterministically.
+    socket.on('NEXT', ({ roomCode, seq }) => {
+      if (!roomCode) return;
+      const serverReceivedAt = performance.now();
+      const room = roomsStore.get(roomCode);
+      if (!room) return;
+
+      const prevIndex = room.currentSongIndex;
+      diag('SERVER', roomCode, 'NEXT', 'receive', { seq: seq ?? null, currentIndex: prevIndex, t: serverReceivedAt.toFixed(2) });
+      log(`NEXT  room=${roomCode}  currentIndex=${prevIndex}`);
+
+      if (room.currentSongIndex < room.queue.length - 1) {
+        room.currentSongIndex += 1;
+        room.progress = 0;
+        room.isPlaying = true;
+        room.revision += 1;
+      } else {
+        room.isPlaying = false;
+      }
+      room.lastActivity = Date.now();
+      roomsStore.set(roomCode, room);
+
+      const serverSentAt = performance.now();
+      const command = {
+        roomCode,
+        type: 'next',
+        rev: room.revision,
+        songIndex: room.currentSongIndex,
+        isPlaying: room.isPlaying,
+        position: 0,
+        serverSentAt: Date.now(),
+        seq: seq ?? null,
+      };
+      socket.to(roomCode).emit('PLAYBACK_COMMAND', command);
+      diag('SERVER', roomCode, 'NEXT', 'broadcast', {
+        rev: room.revision,
+        songIndex: room.currentSongIndex,
+        isPlaying: room.isPlaying,
+        t: serverSentAt.toFixed(2),
+        serverProcessMs: +(serverSentAt - serverReceivedAt).toFixed(2),
+      });
+    });
+
+    // ─── PREVIOUS ───────────────────────────────────────────────────────────
+    socket.on('PREVIOUS', ({ roomCode, seq }) => {
+      if (!roomCode) return;
+      const serverReceivedAt = performance.now();
+      const room = roomsStore.get(roomCode);
+      if (!room) return;
+
+      const prevIndex = room.currentSongIndex;
+      diag('SERVER', roomCode, 'PREVIOUS', 'receive', { seq: seq ?? null, currentIndex: prevIndex, t: serverReceivedAt.toFixed(2) });
+      log(`PREVIOUS  room=${roomCode}  currentIndex=${prevIndex}`);
+
+      if (room.currentSongIndex > 0) {
+        room.currentSongIndex -= 1;
+        room.progress = 0;
+        room.isPlaying = true;
+        room.revision += 1;
+      }
+      room.lastActivity = Date.now();
+      roomsStore.set(roomCode, room);
+
+      const serverSentAt = performance.now();
+      const command = {
+        roomCode,
+        type: 'previous',
+        rev: room.revision,
+        songIndex: room.currentSongIndex,
+        isPlaying: room.isPlaying,
+        position: 0,
+        serverSentAt: Date.now(),
+        seq: seq ?? null,
+      };
+      socket.to(roomCode).emit('PLAYBACK_COMMAND', command);
+      diag('SERVER', roomCode, 'PREVIOUS', 'broadcast', {
+        rev: room.revision,
+        songIndex: room.currentSongIndex,
+        isPlaying: room.isPlaying,
+        t: serverSentAt.toFixed(2),
+        serverProcessMs: +(serverSentAt - serverReceivedAt).toFixed(2),
+      });
     });
 
     // ─── CLOCK_SYNC ───────────────────────────────────────────────────────

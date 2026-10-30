@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       progress: 0,
       createdAt: now,
       lastActivity: now,
+      revision: 0,
     });
 
     return NextResponse.json({ roomCode }, { status: 201 });

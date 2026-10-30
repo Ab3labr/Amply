@@ -34,9 +34,11 @@ interface HostPlayerProps {
   onPlay?: (seq?: number) => void;
   onPause?: (seq?: number) => void;
   onSeek?: (position: number, seq?: number) => void;
+  onNext?: (seq?: number) => void;
+  onPrevious?: (seq?: number) => void;
 }
 
-export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, onPause, onSeek }: HostPlayerProps) {
+export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, onPause, onSeek, onNext, onPrevious }: HostPlayerProps) {
   try {
     console.log('[HostPlayer] Component render - Props:', { code, queueLength: queue.length, currentSongIndex, isPlaying });
 
@@ -59,7 +61,17 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     const lastSyncedProgressRef = useRef<number>(0);
     const lastDiagPlayRef = useRef<boolean | null>(null);
 
+    // Pre-cue player: hidden second player that pre-loads the next song
+    // so that when NEXT is pressed the video is already buffered.
+    const preCuePlayerRef = useRef<any>(null);
+    const preCueContainerRef = useRef<HTMLDivElement>(null);
+    const preCueGenerationRef = useRef<number>(0);
+    const preCueReadyRef = useRef<boolean>(false);
+    const preCueVideoIdRef = useRef<string | null>(null);
+    const preCueSwappingRef = useRef<boolean>(false);
+
     const currentSong = queue[currentSongIndex];
+    const nextSong = queue[currentSongIndex + 1];
 
     // Component mount/unmount logging
     useEffect(() => {
@@ -107,7 +119,7 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     }
   }, []);
 
-  // Initialize player
+  // Initialize player (only on first ready — NOT on song changes)
   useEffect(() => {
     console.log('[HostPlayer] Player initialization useEffect executing', {
       playerReady,
@@ -117,37 +129,13 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     });
 
     try {
-      const initVideoId = getYouTubeVideoId(currentSong?.url || '');
-      diag("PLAYER", code, "player", "effect-deps-ran", {
-        role: "host",
-        videoId: initVideoId || null,
-        prevVideoId: prevVideoIdRef.current,
-        index: currentSongIndex,
-        willRecreate: !!playerRef.current,
-      });
-
       if (!playerReady || !containerRef.current) return;
+      // If a player already exists, song changes are handled by the separate
+      // effect below — we do NOT destroy/recreate here.
+      if (playerRef.current) return;
 
-      // Bump the generation for this player creation. Any callback from a
-      // previous (destroyed) instance is now stale and must not drive the player.
       const generation = playerGenerationRef.current + 1;
       playerGenerationRef.current = generation;
-
-      if (playerRef.current) {
-        console.log('[HostPlayer] Destroying existing player instance');
-        diag("HOST", code, "player", "destroy", {});
-        diag("PLAYER", code, "player", "destroy", {
-          role: "host",
-          videoId: prevVideoIdRef.current ?? null,
-        });
-        try {
-          playerRef.current.destroy();
-        } catch (error) {
-          console.error('[HostPlayer] Error destroying player:', error);
-        }
-        playerRef.current = null;
-        setPlayerInstanceReady(false);
-      }
 
       const videoId = getYouTubeVideoId(currentSong?.url || '');
       console.log('[HostPlayer] Creating new YouTube player with videoId:', videoId);
@@ -160,9 +148,6 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       });
       prevVideoIdRef.current = videoId || null;
 
-      // Create the player but do not use the constructor return value as the
-      // canonical instance. The YT API provides the canonical instance via
-      // `onReady` as `event.target`.
       new window.YT.Player(containerRef.current, {
         height: '200',
         width: '200',
@@ -184,11 +169,9 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
               console.log('[HostPlayer] YouTube onReady event fired');
               diag("HOST", code, "player", "onReady", { index: currentSongIndex });
               diag("PLAYER", code, "player", "ready", { role: "host", videoId, index: currentSongIndex, gen: generation });
-              // Store the canonical YT.Player instance from event.target
               playerRef.current = event.target as any;
               setPlayerInstanceReady(true);
 
-              // Capture the current track duration for the progress readout
               const readyDuration = playerRef.current?.getDuration?.();
               if (readyDuration && readyDuration > 0) {
                 setDuration(readyDuration);
@@ -256,8 +239,14 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
               }
               if (event.data === window.YT.PlayerState.ENDED) {
                 console.log('[HostPlayer] Song ended, calling handleNext');
-                diag("HOST", code, "ENDED", "yt-ended", { index: currentSongIndex });
+                diag("HOST", code, "ENDED", "yt-ended", { index: currentSongIndex, t: performance.now().toFixed(2) });
                 handleNext();
+              } else if (event.data === window.YT.PlayerState.PLAYING) {
+                diag("HOST", code, "PLAY", "yt-playing", { t: performance.now().toFixed(2), index: currentSongIndex });
+              } else if (event.data === window.YT.PlayerState.BUFFERING) {
+                diag("HOST", code, "BUFFERING", "yt-buffering", { t: performance.now().toFixed(2) });
+              } else if (event.data === window.YT.PlayerState.CUED) {
+                diag("HOST", code, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
               }
             } catch (error) {
               console.error('[HostPlayer] Error in onStateChange callback:', error);
@@ -274,8 +263,6 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     }
 
     return () => {
-      // Bump the generation so any callbacks still pending from this player
-      // instance are invalidated before the new player is created.
       playerGenerationRef.current += 1;
       console.log('[HostPlayer] Player initialization useEffect cleanup - destroying player');
       try {
@@ -293,7 +280,173 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       playerRef.current = null;
       setPlayerInstanceReady(false);
     };
-  }, [playerReady, currentSong?.url]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerReady]);
+
+  // Create pre-cue player: a second hidden YT.Player that pre-loads the next
+  // song so when NEXT is pressed the video is already buffered.
+  useEffect(() => {
+    if (!playerReady || !preCueContainerRef.current) return;
+    if (preCuePlayerRef.current) return;
+
+    const generation = preCueGenerationRef.current + 1;
+    preCueGenerationRef.current = generation;
+
+    new window.YT.Player(preCueContainerRef.current, {
+      height: '200',
+      width: '200',
+      videoId: '',
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        modestbranding: 1,
+      },
+      events: {
+        onReady: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          preCuePlayerRef.current = event.target;
+          try { preCuePlayerRef.current.mute(); } catch {}
+          diag("HOST", code, "pre-cue", "ready", {});
+          diag("PLAYER", code, "pre-cue", "ready", { role: "host" });
+        },
+        onStateChange: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          if (event.data === window.YT.PlayerState.PLAYING) {
+            preCueReadyRef.current = true;
+            diag("HOST", code, "pre-cue", "playing", { videoId: preCueVideoIdRef.current, t: performance.now().toFixed(2) });
+            diag("PLAYER", code, "pre-cue", "buffered", { role: "host", videoId: preCueVideoIdRef.current });
+          } else if (event.data === window.YT.PlayerState.BUFFERING) {
+            diag("HOST", code, "pre-cue", "buffering", { videoId: preCueVideoIdRef.current });
+          } else if (event.data === window.YT.PlayerState.CUED) {
+            diag("HOST", code, "pre-cue", "cued", { videoId: preCueVideoIdRef.current });
+          }
+        },
+        onError: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          diag("HOST", code, "pre-cue", "error", { data: event.data });
+        },
+      },
+    });
+
+    return () => {
+      preCueGenerationRef.current += 1;
+      try { preCuePlayerRef.current?.destroy(); } catch {}
+      preCuePlayerRef.current = null;
+      preCueReadyRef.current = false;
+      preCueVideoIdRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerReady]);
+
+  // Load next song on pre-cue player when current song changes
+  useEffect(() => {
+    if (!preCuePlayerRef.current) return;
+
+    const nextIndex = currentSongIndex + 1;
+    if (nextIndex >= queue.length) {
+      if (preCueReadyRef.current) {
+        diag("HOST", code, "pre-cue", "clear-no-next", {});
+        preCueReadyRef.current = false;
+        preCueVideoIdRef.current = null;
+      }
+      return;
+    }
+
+    const nextSongItem = queue[nextIndex];
+    const nextVideoId = getYouTubeVideoId(nextSongItem?.url || '');
+    if (!nextVideoId) return;
+    if (nextVideoId === preCueVideoIdRef.current) return;
+
+    diag("HOST", code, "pre-cue", "load", { nextVideoId, index: nextIndex, t: performance.now().toFixed(2) });
+    diag("PLAYER", code, "pre-cue", "load", { role: "host", nextVideoId, index: nextIndex });
+    preCueReadyRef.current = false;
+    preCueVideoIdRef.current = nextVideoId;
+    try { preCuePlayerRef.current.loadVideoById(nextVideoId); } catch {}
+  }, [currentSongIndex, queue, code]);
+
+  // Song change: use pre-cue player if available, otherwise fall back to loadVideoById
+  useEffect(() => {
+    if (!playerRef.current || !playerInstanceReady) return;
+    const newVideoId = getYouTubeVideoId(currentSong?.url || '');
+    if (!newVideoId) return;
+    if (newVideoId === prevVideoIdRef.current) return;
+
+    const songChangeAt = performance.now();
+
+    // Check if pre-cue player has this video loaded and ready
+    const canUsePreCue =
+      !preCueSwappingRef.current &&
+      preCueReadyRef.current &&
+      preCueVideoIdRef.current === newVideoId &&
+      preCuePlayerRef.current;
+
+    if (canUsePreCue) {
+      diag("HOST", code, "player", "pre-cue-swap", {
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: songChangeAt.toFixed(2),
+      });
+      diag("PLAYER", code, "player", "song-change", {
+        role: "host",
+        method: "pre-cue-swap",
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: songChangeAt.toFixed(2),
+      });
+
+      preCueSwappingRef.current = true;
+
+      // Pause and mute the old primary player
+      try { playerRef.current.pauseVideo(); } catch {}
+      try { playerRef.current.mute(); } catch {}
+
+      // Unmute and play the pre-cue player
+      try { preCuePlayerRef.current.unMute(); } catch {}
+      try { preCuePlayerRef.current.playVideo(); } catch {}
+
+      // Swap refs
+      const oldPrimary = playerRef.current;
+      playerRef.current = preCuePlayerRef.current;
+      preCuePlayerRef.current = null;
+      preCueReadyRef.current = false;
+      preCueVideoIdRef.current = null;
+
+      // Destroy the old primary player
+      try { oldPrimary.destroy(); } catch {}
+
+      prevVideoIdRef.current = newVideoId;
+      preCueSwappingRef.current = false;
+      diag("HOST", code, "player", "pre-cue-swap-done", {
+        t: performance.now().toFixed(2),
+        dyMs: +(performance.now() - songChangeAt).toFixed(2),
+      });
+    } else {
+      // Cold path: fall back to loadVideoById on the primary player
+      diag("HOST", code, "player", "loadVideoById", {
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: songChangeAt.toFixed(2),
+        preCueReady: preCueReadyRef.current,
+        preCueVideoId: preCueVideoIdRef.current,
+      });
+      diag("PLAYER", code, "player", "song-change", {
+        role: "host",
+        method: "cold",
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: songChangeAt.toFixed(2),
+      });
+
+      prevVideoIdRef.current = newVideoId;
+      playerRef.current.loadVideoById(newVideoId);
+    }
+  }, [currentSong?.url, currentSongIndex, playerInstanceReady, code]);
 
   // Control playback
   useEffect(() => {
@@ -508,10 +661,9 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     });
     const seq = nextSeq();
     const clickAt = performance.now();
-    diag("HOST", code, "NEXT", "click", { seq });
+    diag("HOST", code, "NEXT", "click", { seq, t: clickAt.toFixed(2) });
     diag("PLAYER", code, "next", "request", { role: "host", seq });
 
-    // Defensive guard: don't proceed if player is being destroyed/recreated
     if (!playerRef.current || !playerInstanceReady) {
       console.warn('[HostPlayer] handleNext called but player not ready, skipping');
       diag("HOST", code, "NEXT", "skip-not-ready", { seq });
@@ -519,38 +671,13 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       return;
     }
 
+    // Emit Socket.IO NEXT — the server handler is the authoritative path.
     try {
-      let position = 0;
-      try {
-        position = playerRef.current?.getCurrentTime?.() ?? 0;
-        console.log('[HostPlayer] Current position:', position);
-      } catch (error) {
-        console.error('[HostPlayer] Error getting current time:', error);
-      }
-
-      try {
-        onSeek?.(position, seq);
-      } catch (error) {
-        console.error('[HostPlayer] Error in onSeek callback:', error);
-      }
-
-      console.log('[HostPlayer] Sending next action to server');
-      const res = await fetch(`/api/rooms/${code}/player`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "next", seq }),
-      });
-      diag("HOST", code, "NEXT", "api-response", {
-        seq,
-        status: res.status,
-        dyMs: +(performance.now() - clickAt).toFixed(2),
-      });
-      console.log('[HostPlayer] Next action completed successfully');
+      onNext?.(seq);
+      const emitDone = performance.now();
+      diag("HOST", code, "NEXT", "emit-done", { seq, t: emitDone.toFixed(2), dyMs: +(emitDone - clickAt).toFixed(2) });
     } catch (error) {
-      console.error('[HostPlayer] handleNext error:', error);
-      if (!(error instanceof Error) || error.name !== 'AbortError') {
-        console.error('[HostPlayer] Next error:', error);
-      }
+      console.error('[HostPlayer] Error in onNext callback:', error);
     }
   };
 
@@ -561,10 +688,9 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     });
     const seq = nextSeq();
     const clickAt = performance.now();
-    diag("HOST", code, "PREVIOUS", "click", { seq });
+    diag("HOST", code, "PREVIOUS", "click", { seq, t: clickAt.toFixed(2) });
     diag("PLAYER", code, "previous", "request", { role: "host", seq });
 
-    // Defensive guard: don't proceed if player is being destroyed/recreated
     if (!playerRef.current || !playerInstanceReady) {
       console.warn('[HostPlayer] handlePrevious called but player not ready, skipping');
       diag("HOST", code, "PREVIOUS", "skip-not-ready", { seq });
@@ -573,43 +699,18 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     }
 
     try {
-      let position = 0;
-      try {
-        position = playerRef.current?.getCurrentTime?.() ?? 0;
-        console.log('[HostPlayer] Current position:', position);
-      } catch (error) {
-        console.error('[HostPlayer] Error getting current time:', error);
-      }
-
-      try {
-        onSeek?.(position, seq);
-      } catch (error) {
-        console.error('[HostPlayer] Error in onSeek callback:', error);
-      }
-
-      console.log('[HostPlayer] Sending previous action to server');
-      const res = await fetch(`/api/rooms/${code}/player`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "previous", seq }),
-      });
-      diag("HOST", code, "PREVIOUS", "api-response", {
-        seq,
-        status: res.status,
-        dyMs: +(performance.now() - clickAt).toFixed(2),
-      });
-      console.log('[HostPlayer] Previous action completed successfully');
+      onPrevious?.(seq);
+      const emitDone = performance.now();
+      diag("HOST", code, "PREVIOUS", "emit-done", { seq, t: emitDone.toFixed(2), dyMs: +(emitDone - clickAt).toFixed(2) });
     } catch (error) {
-      console.error('[HostPlayer] handlePrevious error:', error);
-      if (!(error instanceof Error) || error.name !== 'AbortError') {
-        console.error('[HostPlayer] Previous error:', error);
-      }
+      console.error('[HostPlayer] Error in onPrevious callback:', error);
     }
   };
 
   return (
     <>
       <div ref={containerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
+      <div ref={preCueContainerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
       <NowPlayingStage
         variant="host"
         currentSong={currentSong ?? null}

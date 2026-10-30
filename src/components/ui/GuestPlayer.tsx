@@ -56,6 +56,14 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
   const prevVideoIdRef = useRef<string | null>(null);
   const lastDiagPlayRef = useRef<boolean | null>(null);
 
+  // Pre-cue player: hidden second player that pre-loads the next song
+  const preCuePlayerRef = useRef<any>(null);
+  const preCueContainerRef = useRef<HTMLDivElement>(null);
+  const preCueGenerationRef = useRef<number>(0);
+  const preCueReadyRef = useRef<boolean>(false);
+  const preCueVideoIdRef = useRef<string | null>(null);
+  const preCueSwappingRef = useRef<boolean>(false);
+
   const currentSong = queue[currentSongIndex];
 
   // Load YouTube IFrame API
@@ -74,34 +82,16 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
     }
   }, []);
 
-  // Initialize player
+  // Initialize player (only on first ready — NOT on song changes)
   useEffect(() => {
-    const initVideoId = getYouTubeVideoId(currentSong?.url || '');
-    diag("PLAYER", roomCode, "player", "effect-deps-ran", {
-      role: "guest",
-      videoId: initVideoId || null,
-      prevVideoId: prevVideoIdRef.current,
-      index: currentSongIndex,
-      willRecreate: !!playerRef.current,
-    });
-
     if (!playerReady || !containerRef.current) return;
+    // If a player already exists, song changes are handled by the separate
+    // effect below — we do NOT destroy/recreate here.
+    if (playerRef.current) return;
 
     const generation = playerGenerationRef.current + 1;
     playerGenerationRef.current = generation;
 
-    if (playerRef.current) {
-      diag("GUEST", roomCode, "player", "destroy", {});
-      diag("PLAYER", roomCode, "player", "destroy", {
-        role: "guest",
-        videoId: prevVideoIdRef.current ?? null,
-      });
-      playerRef.current.destroy();
-      playerRef.current = null;
-      setPlayerInstanceReady(false);
-    }
-
-    // Create the player but do NOT rely on the constructor return value.
     const guestVideoId = getYouTubeVideoId(currentSong?.url || '');
     diag("GUEST", roomCode, "player", "create", { index: currentSongIndex });
     diag("PLAYER", roomCode, "player", "create", {
@@ -114,7 +104,7 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
     new window.YT.Player(containerRef.current, {
       height: '200',
       width: '200',
-      videoId: getYouTubeVideoId(currentSong?.url || ''),
+      videoId: guestVideoId,
       playerVars: {
         autoplay: 0,
         controls: 0,
@@ -125,7 +115,6 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
       events: {
         onReady: (event: any) => {
           if (playerGenerationRef.current !== generation) return;
-          // Store canonical instance from event.target
           playerRef.current = event.target as any;
           setPlayerInstanceReady(true);
           diag("GUEST", roomCode, "player", "onReady", { index: currentSongIndex });
@@ -163,16 +152,22 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
           if (event.data === window.YT.PlayerState.ENDED) {
             diag("GUEST", roomCode, "ENDED", "yt-ended", { index: currentSongIndex });
           } else if (event.data === window.YT.PlayerState.PLAYING) {
-            diag("GUEST", roomCode, "PLAY", "yt-playing", {});
+            const playingAt = performance.now();
+            diag("GUEST", roomCode, "PLAY", "yt-playing", { t: playingAt.toFixed(2) });
             setTimeout(() => {
               if (playerRef.current && playerGenerationRef.current === generation) {
                 diag("GUEST", roomCode, "PLAY", "currentTime-sample", {
                   value: playerRef.current.getCurrentTime?.(),
+                  t: performance.now().toFixed(2),
                 });
               }
             }, 250);
           } else if (event.data === window.YT.PlayerState.PAUSED) {
             diag("GUEST", roomCode, "PAUSE", "yt-paused", {});
+          } else if (event.data === window.YT.PlayerState.BUFFERING) {
+            diag("GUEST", roomCode, "BUFFERING", "yt-buffering", { t: performance.now().toFixed(2) });
+          } else if (event.data === window.YT.PlayerState.CUED) {
+            diag("GUEST", roomCode, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
           }
         },
         onError: (event: any) => {
@@ -195,7 +190,173 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
       playerRef.current = null;
       setPlayerInstanceReady(false);
     };
-  }, [playerReady, currentSong?.url]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerReady]);
+
+  // Create pre-cue player: a second hidden YT.Player that pre-loads the next
+  // song so when the PLAYBACK_COMMAND arrives the video is already buffered.
+  useEffect(() => {
+    if (!playerReady || !preCueContainerRef.current) return;
+    if (preCuePlayerRef.current) return;
+
+    const generation = preCueGenerationRef.current + 1;
+    preCueGenerationRef.current = generation;
+
+    new window.YT.Player(preCueContainerRef.current, {
+      height: '200',
+      width: '200',
+      videoId: '',
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        modestbranding: 1,
+      },
+      events: {
+        onReady: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          preCuePlayerRef.current = event.target;
+          try { preCuePlayerRef.current.mute(); } catch {}
+          diag("GUEST", roomCode, "pre-cue", "ready", {});
+          diag("PLAYER", roomCode, "pre-cue", "ready", { role: "guest" });
+        },
+        onStateChange: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          if (event.data === window.YT.PlayerState.PLAYING) {
+            preCueReadyRef.current = true;
+            diag("GUEST", roomCode, "pre-cue", "playing", { videoId: preCueVideoIdRef.current, t: performance.now().toFixed(2) });
+            diag("PLAYER", roomCode, "pre-cue", "buffered", { role: "guest", videoId: preCueVideoIdRef.current });
+          } else if (event.data === window.YT.PlayerState.BUFFERING) {
+            diag("GUEST", roomCode, "pre-cue", "buffering", { videoId: preCueVideoIdRef.current });
+          } else if (event.data === window.YT.PlayerState.CUED) {
+            diag("GUEST", roomCode, "pre-cue", "cued", { videoId: preCueVideoIdRef.current });
+          }
+        },
+        onError: (event: any) => {
+          if (preCueGenerationRef.current !== generation) return;
+          diag("GUEST", roomCode, "pre-cue", "error", { data: event.data });
+        },
+      },
+    });
+
+    return () => {
+      preCueGenerationRef.current += 1;
+      try { preCuePlayerRef.current?.destroy(); } catch {}
+      preCuePlayerRef.current = null;
+      preCueReadyRef.current = false;
+      preCueVideoIdRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerReady]);
+
+  // Load next song on pre-cue player when current song changes
+  useEffect(() => {
+    if (!preCuePlayerRef.current) return;
+
+    const nextIndex = currentSongIndex + 1;
+    if (nextIndex >= queue.length) {
+      if (preCueReadyRef.current) {
+        diag("GUEST", roomCode, "pre-cue", "clear-no-next", {});
+        preCueReadyRef.current = false;
+        preCueVideoIdRef.current = null;
+      }
+      return;
+    }
+
+    const nextSongItem = queue[nextIndex];
+    const nextVideoId = getYouTubeVideoId(nextSongItem?.url || '');
+    if (!nextVideoId) return;
+    if (nextVideoId === preCueVideoIdRef.current) return;
+
+    diag("GUEST", roomCode, "pre-cue", "load", { nextVideoId, index: nextIndex, t: performance.now().toFixed(2) });
+    diag("PLAYER", roomCode, "pre-cue", "load", { role: "guest", nextVideoId, index: nextIndex });
+    preCueReadyRef.current = false;
+    preCueVideoIdRef.current = nextVideoId;
+    try { preCuePlayerRef.current.loadVideoById(nextVideoId); } catch {}
+  }, [currentSongIndex, queue, roomCode]);
+
+  // Song change: use pre-cue player if available, otherwise fall back to loadVideoById
+  useEffect(() => {
+    if (!playerRef.current || !playerInstanceReady) return;
+    const newVideoId = getYouTubeVideoId(currentSong?.url || '');
+    if (!newVideoId) return;
+    if (newVideoId === prevVideoIdRef.current) return;
+
+    const loadAt = performance.now();
+
+    // Check if pre-cue player has this video loaded and ready
+    const canUsePreCue =
+      !preCueSwappingRef.current &&
+      preCueReadyRef.current &&
+      preCueVideoIdRef.current === newVideoId &&
+      preCuePlayerRef.current;
+
+    if (canUsePreCue) {
+      diag("GUEST", roomCode, "player", "pre-cue-swap", {
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: loadAt.toFixed(2),
+      });
+      diag("PLAYER", roomCode, "player", "song-change", {
+        role: "guest",
+        method: "pre-cue-swap",
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: loadAt.toFixed(2),
+      });
+
+      preCueSwappingRef.current = true;
+
+      // Pause and mute the old primary player
+      try { playerRef.current.pauseVideo(); } catch {}
+      try { playerRef.current.mute(); } catch {}
+
+      // Unmute and play the pre-cue player
+      try { preCuePlayerRef.current.unMute(); } catch {}
+      try { preCuePlayerRef.current.playVideo(); } catch {}
+
+      // Swap refs
+      const oldPrimary = playerRef.current;
+      playerRef.current = preCuePlayerRef.current;
+      preCuePlayerRef.current = null;
+      preCueReadyRef.current = false;
+      preCueVideoIdRef.current = null;
+
+      // Destroy the old primary player
+      try { oldPrimary.destroy(); } catch {}
+
+      prevVideoIdRef.current = newVideoId;
+      preCueSwappingRef.current = false;
+      diag("GUEST", roomCode, "player", "pre-cue-swap-done", {
+        t: performance.now().toFixed(2),
+        dyMs: +(performance.now() - loadAt).toFixed(2),
+      });
+    } else {
+      // Cold path: fall back to loadVideoById on the primary player
+      diag("GUEST", roomCode, "player", "loadVideoById", {
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: loadAt.toFixed(2),
+        preCueReady: preCueReadyRef.current,
+        preCueVideoId: preCueVideoIdRef.current,
+      });
+      diag("PLAYER", roomCode, "player", "song-change", {
+        role: "guest",
+        method: "cold",
+        newVideoId,
+        prevVideoId: prevVideoIdRef.current,
+        index: currentSongIndex,
+        t: loadAt.toFixed(2),
+      });
+
+      prevVideoIdRef.current = newVideoId;
+      playerRef.current.loadVideoById(newVideoId);
+    }
+  }, [currentSong?.url, currentSongIndex, playerInstanceReady, roomCode]);
 
   // Control playback
   useEffect(() => {
@@ -298,6 +459,7 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
   return (
     <>
       <div ref={containerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
+      <div ref={preCueContainerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
       <NowPlayingStage
         variant="guest"
         currentSong={currentSong ?? null}

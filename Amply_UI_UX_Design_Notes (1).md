@@ -1,5 +1,7 @@
 # Amply UI / UX Design Notes (Living Document)
 
+> **Historical duplicate notice (2026-11-01):** This is the older v0.2 draft. It contains useful historical decisions about Fraunces, adaptive album-art lighting, and the earlier vinyl/artwork composition, but those decisions are superseded by the approved v1.0 reference at `sync research/Amply_UI_UX_Design_Notes.md`. Preserve this file as history; do not use it as the current visual authority or sync it over v1.0.
+
 > Status: Draft v0.2\
 > Purpose: Store long-term UI/UX ideas before implementation.\
 > Changelog: Typography, album art source, and adaptive lighting decisions resolved (v0.2). See "Resolved Decisions" section at the bottom.

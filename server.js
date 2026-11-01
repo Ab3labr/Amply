@@ -76,31 +76,43 @@ app.prepare().then(() => {
       socket.to(roomCode).emit('ROOM_SYNC', { roomCode, message, timestamp });
     });
 
-    socket.on('PLAY', ({ roomCode, timestamp, seq }) => {
+    const broadcastPlaybackUpdate = (event, { roomCode, seq, revision }) => {
       if (!roomCode) return;
-      diag('SERVER', roomCode, 'PLAY', 'receive', { seq: seq ?? null, clientTs: timestamp ?? null });
-      log(`PLAY  room=${roomCode}  timestamp=${timestamp}`);
+      const room = roomsStore.get(roomCode);
+      if (!room || revision !== room.revision) return;
       const broadcastAt = Date.now();
-      socket.to(roomCode).emit('PLAY', { roomCode, timestamp, seq, serverSentAt: broadcastAt });
-      diag('SERVER', roomCode, 'PLAY', 'broadcast', { seq: seq ?? null, serverSentAt: broadcastAt });
+      const update = {
+        roomCode,
+        type: event.toLowerCase(),
+        revision: room.revision,
+        songIndex: room.currentSongIndex,
+        trackId: room.currentTrackId ?? room.queue[room.currentSongIndex]?.id ?? null,
+        positionSeconds: room.positionSeconds ?? 0,
+        progress: room.progress,
+        isPlaying: room.isPlaying,
+        seq,
+        serverSentAt: broadcastAt,
+      };
+      diag('SERVER', roomCode, event, 'broadcast', { seq: seq ?? null, revision, serverSentAt: broadcastAt });
+      socket.to(roomCode).emit('PLAYBACK_UPDATE', update);
+    };
+
+    socket.on('PLAY', (payload) => {
+      if (!payload?.roomCode) return;
+      diag('SERVER', payload.roomCode, 'PLAY', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('PLAY', payload);
     });
 
-    socket.on('PAUSE', ({ roomCode, timestamp, seq }) => {
-      if (!roomCode) return;
-      diag('SERVER', roomCode, 'PAUSE', 'receive', { seq: seq ?? null, clientTs: timestamp ?? null });
-      log(`PAUSE  room=${roomCode}  timestamp=${timestamp}`);
-      const broadcastAt = Date.now();
-      socket.to(roomCode).emit('PAUSE', { roomCode, timestamp, seq, serverSentAt: broadcastAt });
-      diag('SERVER', roomCode, 'PAUSE', 'broadcast', { seq: seq ?? null, serverSentAt: broadcastAt });
+    socket.on('PAUSE', (payload) => {
+      if (!payload?.roomCode) return;
+      diag('SERVER', payload.roomCode, 'PAUSE', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('PAUSE', payload);
     });
 
-    socket.on('SEEK', ({ roomCode, position, timestamp, seq }) => {
-      if (!roomCode) return;
-      diag('SERVER', roomCode, 'SEEK', 'receive', { seq: seq ?? null, position: position ?? null, clientTs: timestamp ?? null });
-      log(`SEEK  room=${roomCode}  position=${position}  timestamp=${timestamp}`);
-      const broadcastAt = Date.now();
-      socket.to(roomCode).emit('SEEK', { roomCode, position, timestamp, seq, serverSentAt: broadcastAt });
-      diag('SERVER', roomCode, 'SEEK', 'broadcast', { seq: seq ?? null, position: position ?? null, serverSentAt: broadcastAt });
+    socket.on('SEEK', (payload) => {
+      if (!payload?.roomCode) return;
+      diag('SERVER', payload.roomCode, 'SEEK', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('SEEK', payload);
     });
 
     // ─── NEXT ──────────────────────────────────────────────────────────────
@@ -119,11 +131,12 @@ app.prepare().then(() => {
       if (room.currentSongIndex < room.queue.length - 1) {
         room.currentSongIndex += 1;
         room.progress = 0;
-        room.isPlaying = true;
-        room.revision += 1;
+        room.positionSeconds = 0;
+        room.currentTrackId = room.queue[room.currentSongIndex]?.id ?? null;
       } else {
         room.isPlaying = false;
       }
+      room.revision += 1;
       room.lastActivity = Date.now();
       roomsStore.set(roomCode, room);
 
@@ -131,10 +144,12 @@ app.prepare().then(() => {
       const command = {
         roomCode,
         type: 'next',
-        rev: room.revision,
+        revision: room.revision,
         songIndex: room.currentSongIndex,
+        trackId: room.currentTrackId ?? room.queue[room.currentSongIndex]?.id ?? null,
         isPlaying: room.isPlaying,
-        position: 0,
+        positionSeconds: room.positionSeconds ?? 0,
+        progress: room.progress,
         serverSentAt: Date.now(),
         seq: seq ?? null,
       };
@@ -162,9 +177,10 @@ app.prepare().then(() => {
       if (room.currentSongIndex > 0) {
         room.currentSongIndex -= 1;
         room.progress = 0;
-        room.isPlaying = true;
-        room.revision += 1;
+        room.positionSeconds = 0;
+        room.currentTrackId = room.queue[room.currentSongIndex]?.id ?? null;
       }
+      room.revision += 1;
       room.lastActivity = Date.now();
       roomsStore.set(roomCode, room);
 
@@ -172,10 +188,12 @@ app.prepare().then(() => {
       const command = {
         roomCode,
         type: 'previous',
-        rev: room.revision,
+        revision: room.revision,
         songIndex: room.currentSongIndex,
+        trackId: room.currentTrackId ?? room.queue[room.currentSongIndex]?.id ?? null,
         isPlaying: room.isPlaying,
-        position: 0,
+        positionSeconds: room.positionSeconds ?? 0,
+        progress: room.progress,
         serverSentAt: Date.now(),
         seq: seq ?? null,
       };

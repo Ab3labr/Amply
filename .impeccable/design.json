@@ -1,0 +1,401 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-31T00:00:00.000Z",
+  "title": "Design System: Amply",
+  "extensions": {
+    "colorMeta": {
+      "current-accent": {
+        "role": "primary",
+        "displayName": "Current Warm Coral Accent",
+        "canonical": "oklch(72% 0.12 25)",
+        "tonalRamp": [
+          "oklch(25% 0.06 25)",
+          "oklch(35% 0.08 25)",
+          "oklch(45% 0.10 25)",
+          "oklch(55% 0.11 25)",
+          "oklch(65% 0.12 25)",
+          "oklch(72% 0.12 25)",
+          "oklch(82% 0.09 25)",
+          "oklch(92% 0.05 25)"
+        ]
+      },
+      "current-background": {
+        "role": "neutral",
+        "displayName": "Current Warm Ivory Ground",
+        "canonical": "oklch(97% 0.008 85)",
+        "tonalRamp": [
+          "oklch(15% 0.008 85)",
+          "oklch(30% 0.008 85)",
+          "oklch(45% 0.008 85)",
+          "oklch(60% 0.008 85)",
+          "oklch(72% 0.008 85)",
+          "oklch(82% 0.008 85)",
+          "oklch(90% 0.008 85)",
+          "oklch(97% 0.008 85)"
+        ]
+      },
+      "current-ink": {
+        "role": "neutral",
+        "displayName": "Current Ink",
+        "canonical": "oklch(12% 0.008 85)",
+        "tonalRamp": [
+          "oklch(12% 0.008 85)",
+          "oklch(20% 0.008 85)",
+          "oklch(30% 0.008 85)",
+          "oklch(40% 0.008 85)",
+          "oklch(55% 0.008 85)",
+          "oklch(70% 0.008 85)",
+          "oklch(85% 0.008 85)",
+          "oklch(95% 0.008 85)"
+        ]
+      },
+      "approved-cream": {
+        "role": "neutral",
+        "displayName": "Approved Cream",
+        "canonical": "#F7F3E7",
+        "tonalRamp": [
+          "#1F1C16",
+          "#3A352B",
+          "#5C5546",
+          "#857C69",
+          "#AFA694",
+          "#D2C9B7",
+          "#E7DFD0",
+          "#F7F3E7"
+        ]
+      },
+      "approved-ink": {
+        "role": "neutral",
+        "displayName": "Approved Near-Black Ink",
+        "canonical": "#080808",
+        "tonalRamp": [
+          "#080808",
+          "#1A1A1A",
+          "#2E2E2E",
+          "#4A4A4A",
+          "#6B6B6B",
+          "#929292",
+          "#C2C2C2",
+          "#F0F0F0"
+        ]
+      },
+      "approved-coral": {
+        "role": "primary",
+        "displayName": "Approved Coral",
+        "canonical": "#D94135",
+        "tonalRamp": [
+          "#3A0F0C",
+          "#5C1813",
+          "#83231C",
+          "#A82D25",
+          "#C6372E",
+          "#D94135",
+          "#E8746B",
+          "#F6B8B2"
+        ]
+      },
+      "approved-blue-violet": {
+        "role": "secondary",
+        "displayName": "Approved Muted Blue-Violet",
+        "canonical": "#526CB8",
+        "tonalRamp": [
+          "#101728",
+          "#1B2747",
+          "#293C6E",
+          "#3A5292",
+          "#465FB0",
+          "#526CB8",
+          "#8799D2",
+          "#C3CCEA"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "current-display": {
+        "displayName": "Current Fraunces Title",
+        "purpose": "Now-playing title only; superseded by the approved Inter Light title."
+      },
+      "current-body": {
+        "displayName": "Current Inter Body",
+        "purpose": "All current interface text outside the display title."
+      },
+      "current-label": {
+        "displayName": "Current Small Label",
+        "purpose": "Uppercase eyebrow and section labels in the current implementation."
+      },
+      "approved-landing-headline": {
+        "displayName": "Approved Landing Headline",
+        "purpose": "The heaviest type in the product; landing page only."
+      },
+      "approved-now-playing": {
+        "displayName": "Approved Now-Playing Title",
+        "purpose": "Oversized uppercase Inter Light title; the player's typographic moment."
+      },
+      "approved-artist": {
+        "displayName": "Approved Artist Line",
+        "purpose": "Restrained uppercase coral artist name beneath the title."
+      },
+      "approved-body": {
+        "displayName": "Approved Body",
+        "purpose": "Interface copy, descriptions and helper text."
+      },
+      "approved-label": {
+        "displayName": "Approved Section Label",
+        "purpose": "Small uppercase labels such as UP NEXT."
+      },
+      "approved-mono": {
+        "displayName": "Approved Technical Mono",
+        "purpose": "Room codes, track numbers, timestamps and durations."
+      }
+    },
+    "shadows": [
+      {
+        "name": "current-play-button-glow",
+        "value": "0 14px 30px -12px oklch(72% 0.11 28 / 0.45)",
+        "purpose": "Current coral play button only; replaced by a near-black control in the approved direction."
+      },
+      {
+        "name": "current-album-card",
+        "value": "inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 50px -20px rgba(0,0,0,0.75)",
+        "purpose": "Current tilted album card only; the approved direction removes the card."
+      },
+      {
+        "name": "current-vinyl",
+        "value": "inset 0 0 0 1px rgba(0,0,0,0.08), 0 26px 60px -18px rgba(0,0,0,0.25), 0 0 0 1px oklch(72% 0.12 25 / 0.15), 0 0 36px 5px oklch(72% 0.12 25 / 0.08)",
+        "purpose": "Current record shadow and coral halo; the approved record keeps weight but drops the halo."
+      },
+      {
+        "name": "current-input-inset",
+        "value": "inset 0 2px 4px rgba(0,0,0,0.2)",
+        "purpose": "Current text inputs; the approved direction prefers a quiet cream fill and hairline."
+      }
+    ],
+    "motion": [
+      {
+        "name": "current-spin",
+        "value": "amply-spin 9s linear infinite",
+        "purpose": "Current vinyl rotation; approved guidance is one revolution every 20–40 seconds."
+      },
+      {
+        "name": "current-eq",
+        "value": "amply-eq 1.1s ease-in-out infinite",
+        "purpose": "Current equalizer bars for the active queue row."
+      },
+      {
+        "name": "ease-pop",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Shared ease used by current controls, progress bar and toast."
+      },
+      {
+        "name": "current-toast",
+        "value": "0.25s cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Toast enter and exit."
+      },
+      {
+        "name": "approved-ui",
+        "value": "120–180ms",
+        "purpose": "Approved hover and focus transitions."
+      },
+      {
+        "name": "approved-interface",
+        "value": "150–250ms",
+        "purpose": "Approved general interface transitions."
+      },
+      {
+        "name": "approved-track-change",
+        "value": "250–400ms",
+        "purpose": "Approved title and artwork song-change transitions."
+      },
+      {
+        "name": "approved-vinyl-accel",
+        "value": "0.6–1.2s",
+        "purpose": "Approved vinyl deceleration and acceleration."
+      },
+      {
+        "name": "approved-vinyl-rotation",
+        "value": "20–40s per revolution",
+        "purpose": "Approved slow vinyl rotation while playing."
+      }
+    ],
+    "breakpoints": [
+      { "name": "current-900", "value": "900px" },
+      { "name": "current-780", "value": "780px" },
+      { "name": "current-640", "value": "640px" },
+      { "name": "current-420", "value": "420px" },
+      { "name": "approved", "value": "Chosen where the composition breaks; no fixed tokens mandated by v1.0." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Current Primary Button",
+      "kind": "button",
+      "refersTo": "current-button-primary",
+      "description": "Near-black rounded button used on the landing, host and join pages today.",
+      "html": "<button class=\"ds-current-btn-primary\">Host a Room</button>",
+      "css": ".ds-current-btn-primary { background: var(--color-primary, #16130f); color: var(--color-background, #f7f4ec); padding: 16px 24px; border-radius: 20px; font: 600 17px/1.2 Inter, sans-serif; border: none; cursor: pointer; transition: background-color .18s ease, transform .18s ease; } .ds-current-btn-primary:hover { background: var(--color-surface-2, #f0ece2); transform: scale(1.02); } .ds-current-btn-primary:active { transform: scale(.98); } .ds-current-btn-primary:focus-visible { outline: 2px solid var(--color-accent-hi, #e08a6a); outline-offset: 3px; }"
+    },
+    {
+      "name": "Current Secondary Button",
+      "kind": "button",
+      "refersTo": "current-button-secondary",
+      "description": "Hairline-bordered ghost button used for the secondary entry action today.",
+      "html": "<button class=\"ds-current-btn-secondary\">Join with Code</button>",
+      "css": ".ds-current-btn-secondary { background: transparent; color: var(--color-primary, #16130f); padding: 16px 24px; border-radius: 20px; border: 1px solid var(--color-border-subtle, rgba(22,19,15,.12)); font: 600 17px/1.2 Inter, sans-serif; cursor: pointer; transition: background-color .18s ease, transform .18s ease; } .ds-current-btn-secondary:hover { background: var(--color-surface-2, #f0ece2); transform: scale(1.02); } .ds-current-btn-secondary:active { transform: scale(.98); } .ds-current-btn-secondary:focus-visible { outline: 2px solid var(--color-accent-hi, #e08a6a); outline-offset: 3px; }"
+    },
+    {
+      "name": "Current Text Input",
+      "kind": "input",
+      "refersTo": "current-input",
+      "description": "Warm cream input with an 18px radius, inset shadow and accent focus ring.",
+      "html": "<input class=\"ds-current-input\" placeholder=\"Your Name\" />",
+      "css": ".ds-current-input { width: 100%; background: var(--color-surface, #faf8f3); color: var(--color-primary, #16130f); border: 1px solid var(--color-border-subtle, rgba(22,19,15,.12)); border-radius: 18px; padding: 16px 24px; font: 400 16px/1.5 Inter, sans-serif; box-shadow: inset 0 2px 4px rgba(0,0,0,.2); outline: none; transition: border-color .18s ease, background-color .18s ease; } .ds-current-input::placeholder { color: var(--color-secondary, #6d675e); } .ds-current-input:focus { border-color: transparent; outline: 2px solid var(--color-accent, #d97a5f); outline-offset: 2px; }"
+    },
+    {
+      "name": "Current Play Button",
+      "kind": "custom",
+      "refersTo": "current-play-button",
+      "description": "Large coral circular play/pause control in the current centered player.",
+      "html": "<button class=\"ds-current-play\" aria-label=\"Play\"><svg width=\"26\" height=\"26\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\"/></svg></button>",
+      "css": ".ds-current-play { width: 72px; height: 72px; display: grid; place-items: center; border-radius: 999px; border: none; background: var(--color-accent, #d97a5f); color: oklch(14% 0.02 50); cursor: pointer; box-shadow: 0 14px 30px -12px oklch(72% .11 28 / .45); transition: background-color .18s ease, transform .18s ease; } .ds-current-play:hover { background: var(--color-accent-hi, #e08a6a); transform: translateY(1px) scale(.97); } .ds-current-play:focus-visible { outline: 2px solid var(--color-accent-hi, #e08a6a); outline-offset: 3px; }"
+    },
+    {
+      "name": "Current Room Code Chip",
+      "kind": "chip",
+      "refersTo": "current-room-chip",
+      "description": "Cream pill with an uppercase room code and a circular copy button.",
+      "html": "<div class=\"ds-current-room-chip\"><span>Y964RP</span><button aria-label=\"Copy room code\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><rect x=\"9\" y=\"9\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"/></svg></button></div>",
+      "css": ".ds-current-room-chip { display: inline-flex; align-items: center; gap: 10px; background: var(--color-surface, #faf8f3); border: 1px solid var(--color-border-subtle, rgba(22,19,15,.12)); border-radius: 999px; padding: 7px 10px 7px 16px; font: 400 15px/1.2 Inter, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--color-primary, #16130f); } .ds-current-room-chip button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; border: none; background: transparent; color: var(--color-secondary, #6d675e); cursor: pointer; } .ds-current-room-chip button:hover { background: var(--color-surface-2, #f0ece2); color: var(--color-primary, #16130f); }"
+    },
+    {
+      "name": "Approved Primary Button",
+      "kind": "button",
+      "refersTo": "approved-button-primary",
+      "description": "Solid near-black pill with cream text; approved landing and form primary action.",
+      "html": "<button class=\"ds-approved-btn-primary\">Host a Room</button>",
+      "css": ".ds-approved-btn-primary { background: #080808; color: #F7F3E7; padding: 16px 40px; border-radius: 999px; border: none; font: 600 16px/1.2 Inter, sans-serif; cursor: pointer; transition: opacity .16s ease, transform .16s ease; } .ds-approved-btn-primary:hover { opacity: .9; } .ds-approved-btn-primary:active { transform: translateY(1px); } .ds-approved-btn-primary:focus-visible { outline: 2px solid #D94135; outline-offset: 3px; }"
+    },
+    {
+      "name": "Approved Secondary Button",
+      "kind": "button",
+      "refersTo": "approved-button-secondary",
+      "description": "Outlined near-black pill on cream; approved secondary entry action.",
+      "html": "<button class=\"ds-approved-btn-secondary\">Join with Code</button>",
+      "css": ".ds-approved-btn-secondary { background: transparent; color: #080808; padding: 16px 40px; border-radius: 999px; border: 1.5px solid #080808; font: 600 16px/1.2 Inter, sans-serif; cursor: pointer; transition: background-color .16s ease, transform .16s ease; } .ds-approved-btn-secondary:hover { background: rgba(8,8,8,.05); } .ds-approved-btn-secondary:active { transform: translateY(1px); } .ds-approved-btn-secondary:focus-visible { outline: 2px solid #D94135; outline-offset: 3px; }"
+    },
+    {
+      "name": "Approved Text Input",
+      "kind": "input",
+      "refersTo": "approved-input",
+      "description": "Pill-shaped cream input with a thin near-black hairline and coral focus ring.",
+      "html": "<input class=\"ds-approved-input\" placeholder=\"Your name\" />",
+      "css": ".ds-approved-input { width: 100%; background: #F7F3E7; color: #080808; border: 1px solid rgba(8,8,8,.2); border-radius: 999px; padding: 14px 24px; font: 400 16px/1.5 Inter, sans-serif; outline: none; transition: border-color .16s ease; } .ds-approved-input::placeholder { color: rgba(8,8,8,.55); } .ds-approved-input:focus { border-color: #D94135; outline: 2px solid #D94135; outline-offset: 2px; }"
+    },
+    {
+      "name": "Approved Play Button",
+      "kind": "custom",
+      "refersTo": "approved-play-button",
+      "description": "Large near-black circular play/pause control with a cream icon.",
+      "html": "<button class=\"ds-approved-play\" aria-label=\"Play\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\"/></svg></button>",
+      "css": ".ds-approved-play { width: 72px; height: 72px; display: grid; place-items: center; border-radius: 999px; border: none; background: #080808; color: #F7F3E7; cursor: pointer; transition: opacity .16s ease, transform .16s ease; } .ds-approved-play:hover { opacity: .9; } .ds-approved-play:active { transform: translateY(1px); } .ds-approved-play:focus-visible { outline: 2px solid #D94135; outline-offset: 3px; }"
+    },
+    {
+      "name": "Approved Room Code Chip",
+      "kind": "chip",
+      "refersTo": "approved-room-chip",
+      "description": "Subtle cream pill with a mono uppercase room code and copy action.",
+      "html": "<div class=\"ds-approved-room-chip\"><span>Y964RP</span><button aria-label=\"Copy room code\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><rect x=\"9\" y=\"9\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"/></svg></button></div>",
+      "css": ".ds-approved-room-chip { display: inline-flex; align-items: center; gap: 8px; background: #F7F3E7; border: 1px solid rgba(8,8,8,.15); border-radius: 999px; padding: 8px 12px; color: #080808; font: 400 13px/1.2 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; } .ds-approved-room-chip button { border: none; background: transparent; color: rgba(8,8,8,.65); cursor: pointer; display: grid; place-items: center; } .ds-approved-room-chip button:hover { color: #080808; } .ds-approved-room-chip button:focus-visible { outline: 2px solid #D94135; outline-offset: 2px; }"
+    },
+    {
+      "name": "Approved Queue Row",
+      "kind": "custom",
+      "refersTo": "approved-queue-row",
+      "description": "Editorial queue row with mono number, square thumbnail, title, blue-violet artist and mono duration. No card.",
+      "html": "<div class=\"ds-approved-queue-row\"><span class=\"ds-q-num\">01</span><div class=\"ds-q-thumb\" aria-hidden=\"true\"></div><div class=\"ds-q-meta\"><div class=\"ds-q-title\">Ride</div><div class=\"ds-q-artist\">Twenty One Pilots</div></div><span class=\"ds-q-duration\">3:43</span></div>",
+      "css": ".ds-approved-queue-row { display: grid; grid-template-columns: 28px 44px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(8,8,8,.08); color: #080808; font-family: Inter, sans-serif; } .ds-q-num { font: 400 13px/1.2 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .05em; } .ds-q-thumb { width: 44px; height: 44px; background: #A1A18A; } .ds-q-title { font: 500 15px/1.3 Inter, sans-serif; } .ds-q-artist { font: 400 13px/1.3 Inter, sans-serif; color: #526CB8; } .ds-q-duration { font: 400 13px/1.2 'IBM Plex Mono', ui-monospace, monospace; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Editorial Record Player",
+    "overview": "The approved product should feel like a carefully art-directed music object: a cream-and-ink editorial composition where an oversized black record anchors the left, a thin coral orbit tracks real playback, and the song title, real artwork and integrated queue form one calm right-hand composition. The landing page carries the same identity through a large painterly wave. The music is the event; the interface is the frame. The current implementation has already moved away from the earlier dark maroon player: globals.css defines a warm ivory light theme with near-black ink and a warm coral/amber accent. However, the player composition is still the earlier centered stage: a spinning vinyl with a cursor-tilted square album card on top, a Fraunces display title, a bordered 384px queue rail and a coral play button. Those are transitional artifacts, not the approved v1.0 composition.",
+    "keyCharacteristics": [
+      "Current: warm ivory ground, near-black ink, warm coral/amber accent, Fraunces title, centered vinyl + tilted album card, bordered right queue rail.",
+      "Approved: warm cream/ivory and near-black ink, coral as the functional accent, blue-violet for secondary metadata, painterly colour only as atmosphere.",
+      "Approved: asymmetric editorial player with an oversized cropped black vinyl, separate coral orbit, Inter Light uppercase title, separate square artwork, integrated queue, minimal chrome.",
+      "Approved: real room data only; no sample songs, artists, participants or artwork.",
+      "Approved: calm, slow motion; accessibility and truthful states are part of the aesthetic."
+    ],
+    "rules": [
+      {
+        "name": "The Ink-and-Cream Rule",
+        "body": "The approved interface is carried by cream and near-black. Coral and blue-violet are accents, not fields. If a screen reads as coral, violet or gradient-first, it has drifted.",
+        "section": "colors"
+      },
+      {
+        "name": "The Coral Is Functional Rule",
+        "body": "In the approved player, coral marks playback progress, the artist line and a small number of active states. It is not a background wash and is not used behind important text.",
+        "section": "colors"
+      },
+      {
+        "name": "The Current-Is-Not-Approved Rule",
+        "body": "The current light theme is an intermediate migration. Do not infer the approved composition, typography or component shapes from it.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Fraunces Rule",
+        "body": "Do not use Fraunces for the approved player or redesigned product UI. The approved title is Inter Light, uppercase.",
+        "section": "typography"
+      },
+      {
+        "name": "The Two-Family Rule",
+        "body": "Inter and IBM Plex Mono are the approved system. Do not add a third family.",
+        "section": "typography"
+      },
+      {
+        "name": "The Title Is the Second Focal Point Rule",
+        "body": "The vinyl is first; the song title is second. Do not let the artist, artwork or queue compete with the title.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-by-Default Rule",
+        "body": "In the approved system, surfaces are flat at rest. Depth comes from tone, spacing and the record's physical mass. Shadows appear only as restrained state feedback, never as decoration.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No-Glass Rule",
+        "body": "No glassmorphism, frosted panels or glowing UI containers.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Pill-or-Square Rule",
+        "body": "In the approved system, actions and inputs are pills; artwork and thumbnails are squares. Do not round artwork into cards, and do not square off primary actions.",
+        "section": "shapes"
+      },
+      {
+        "name": "The No-Card-Queue Rule",
+        "body": "The approved queue is an editorial track listing, not a card, panel or spreadsheet. Do not put each row in its own container.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do treat sync research/Amply_UI_UX_Design_Notes.md v1.0 as the authoritative visual direction for all UI work.",
+      "Do keep the approved interface cream and near-black first, with coral as the functional accent and blue-violet for secondary metadata.",
+      "Do keep the approved vinyl black and dominant, with a separate cream/olive centre label.",
+      "Do keep vinyl rotation tied to playback state and the orbit marker tied to real playback progress; never derive one from the other.",
+      "Do use Inter for the approved UI, Inter Light for the uppercase now-playing title, and IBM Plex Mono for technical metadata.",
+      "Do use real room data for titles, thumbnails, participants and durations.",
+      "Do preserve the existing backend, sync behaviour and working functionality while the UI/UX phase is in progress."
+    ],
+    "donts": [
+      "Don't treat the current centered stage, tilted album card, Fraunces title, coral play button or bordered queue rail as the approved visual direction.",
+      "Don't reintroduce the earlier dark maroon/near-black player or a dark right-hand queue sidebar.",
+      "Don't use a cursor-following 3D album card or place the album artwork in the centre of the vinyl.",
+      "Don't use Fraunces for the approved player or redesigned product UI.",
+      "Don't use equal columns, dashboard cards, glass panels or a carded queue.",
+      "Don't place a strong multicolour gradient behind important text.",
+      "Don't extract album-art colours to control the whole interface.",
+      "Don't fabricate songs, artists, participants, artwork or success states.",
+      "Don't initiate backend refactoring, playback-timing changes or new feature development during this UI/UX documentation phase."
+    ]
+  }
+}

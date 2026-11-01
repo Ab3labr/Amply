@@ -17,31 +17,43 @@ export async function POST(
       return NextResponse.json({ error: "Room does not exist" }, { status: 404 });
     }
 
-    const { action, progress, seq } = await request.json();
+    const { action, progress, positionSeconds, seq, trackId } = await request.json();
 
     if (action) {
       diag("SERVER", code, String(action).toUpperCase(), "state-update-receive", {
         seq: seq ?? null,
         progress: progress ?? null,
+        positionSeconds: positionSeconds ?? null,
         serverTs: Date.now(),
       });
+    }
+
+    const currentTrackId = room.queue[room.currentSongIndex]?.id ?? null;
+    if (trackId && trackId !== currentTrackId) {
+      return NextResponse.json({ error: "Track changed", room }, { status: 409 });
+    }
+    if (!action && !room.isPlaying) {
+      return NextResponse.json({ success: true, room }, { status: 200 });
     }
 
     if (action === "play") {
       room.isPlaying = true;
     } else if (action === "pause") {
       room.isPlaying = false;
+    } else if (action === "seek") {
+      // Seek changes position but preserves the authoritative play state.
     }
-    // NOTE: "next" and "previous" are handled authoritatively by the Socket.IO
-    // handlers in server.js, which update room state AND broadcast PLAYBACK_COMMAND
-    // to guests. The API route intentionally does NOT process these actions to
-    // avoid double-incrementing the revision or double-mutating song index.
-    // The Socket.IO path fires first (synchronous emit) and the API POST is
-    // a persistence/fallback that only matters when Socket.IO is unavailable.
+    // Track navigation remains authoritative in the Socket.IO handlers.
 
-    if (progress !== undefined) {
-      room.progress = progress;
+    if (Number.isFinite(positionSeconds) && positionSeconds >= 0) {
+      room.positionSeconds = positionSeconds;
     }
+    if (Number.isFinite(progress) && progress >= 0 && progress <= 1) {
+      room.progress = Math.min(1, progress);
+    }
+
+    room.currentTrackId = currentTrackId;
+    room.revision += 1;
 
     room.lastActivity = Date.now();
     roomsStore.set(code, room);
@@ -50,6 +62,7 @@ export async function POST(
       diag("SERVER", code, String(action).toUpperCase(), "state-applied", {
         seq: seq ?? null,
         progress: progress ?? null,
+        positionSeconds: room.positionSeconds,
         isPlaying: room.isPlaying,
         currentSongIndex: room.currentSongIndex,
         serverTs: Date.now(),

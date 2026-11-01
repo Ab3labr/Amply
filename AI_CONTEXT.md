@@ -1,16 +1,135 @@
 # Amply — AI Context & Project Memory
 
-> **Last updated:** 2026-10-23
-> **IMPORTANT:** See `PROJECT_HANDOFF.md` for current project status, unresolved visual design issue, and immediate next steps. This file contains detailed technical context but may not reflect the latest state.
+> **Last audited:** 2026-11-01
+> **Authority:** This file is the primary technical context and handoff. Verify all implementation details against `src/` and `server.js`; use `sync research/Amply_UI_UX_Design_Notes.md` as the approved visual direction. `PROJECT_HANDOFF.md` is a tracked but older handoff and is not current authority.
 >
-> **Recent Changes (2026-10-23):**
+> **Archived change notes (2026-10-23; not a current implementation reference):**
 > - Added Socket.IO NEXT/PREVIOUS commands with timeline broadcast and revision-based conflict resolution
 > - Added pre-cue player for instant song transitions
 > - Attempted light theme conversion to match landing page reference (UNRESOLVED - gradient appears pale/washed out)
 > - Clock sync implementation remains diagnostic (not consumed by playback)  
 > **PHASE 1 — Clock sync (2026-08-10):** Added a temporary, session/room-scoped NTP-style clock estimator. New `src/lib/clock-sync.ts` (client-only) exposes `getEstimatedServerTime()`, `getClockOffset()`, `getClockRtt()`, `getClockUncertainty()`, `hasClockEstimate()` and is started/stopped by the host and guest room pages on socket connect/cleanup. Server replies to a new `CLOCK_SYNC` ack event with receive/send timestamps (`t1`/`t2`). The estimate is anchored to `performance.now()`; low-RTT samples are preferred, obvious outliers (RTT far above median, ack timeouts) are rejected, `uncertainty = max(bestRtt/2, stdev)`. Timing runs of 6 samples every 250ms, then 3-sample maintenance bursts every 15s. All diagnostics logged under `[SYNC:CLOCK]` (sample #, RTT, offset, uncertainty, best sample, estimated server time). Nothing is persisted, no playback/polling/player/UI behavior changed — the estimate is not yet consumed by playback.  
 > **Changelog:** (1) Socket.IO PLAY/PAUSE now functionally control the guest player. The guest page tracks the latest socket command (a `SocketCommand` object) and GuestPlayer executes `playVideo()`/`pauseVideo()` immediately on receipt. HTTP polling remains as the reconciliation/fallback for state. (2) **Player-generation guard added to HostPlayer and GuestPlayer** — a replaced player's late `onReady`/`onStateChange` can no longer re-arm the ready flag with a stale/destroyed instance (fixes the host crash on song change). (3) **Host optimistic play/pause** — the host's own player now reacts at click time instead of waiting for the 2s poll, removing the host/guest asymmetry that was yanking guests backward via drift correction. (4) **Typography + real album art (UI/UX redesign v0.2 — part 1)** — Added Fraunces via `next/font/google` (`--font-fraunces`), exposed as the `font-display` Tailwind token and applied **only** to the now-playing song title in HostPlayer/GuestPlayer; everything else stays Inter. Added `thumbnailUrl` to `QueueItem`, populated at queue-add time in the queue route from the existing video ID (`img.youtube.com/vi/{id}/maxresdefault.jpg`); a shared `TrackThumbnail` component renders the fallback chain (`maxresdefault → hqdefault → mqdefault`) on error and is used for both the Now Playing art and the queue-list rows. Video-ID parsing was centralized in `src/lib/youtube.ts` (handles `watch?v=`, `youtu.be/`, `/embed/`) and is now shared by the players and the queue route instead of being duplicated inline. Build passed; lint error count unchanged from baseline. (5) **OpenDesign "Now Playing" integration (UI/UX v0.3)** — `/host/[code]` and `/room/[code]` now render the `design-reference/opendesign.html` visual system (source of truth = OpenDesign VISUAL, Amply FUNCTIONAL), while preserving every existing sync/Socket.IO/polling/server behavior. New layout: 68px `Topbar` (BrandMark wordmark, `RoomCodeChip` + copy, `AvatarStack` with real members, leave), centered `NowPlayingStage` (spinning vinyl + 3D-tilt album art via `PlayerArt`, Fraunces track title, eyebrow "Now playing/paused", `ProgressBar` with time readouts, `PlaybackControls` host-only), and a 384px right-rail `QueuePanel` ("Up next", add-input, display-only rows with thumbnails + equalizer on current row, footer). `@theme` tokens now use the warm `oklch` OpenDesign palette (`--color-accent` = warm amber); keyframes (`amply-spin`,`amply-eq`) + effect primitives (vinyl/grain/stage glows/eyebrow/queue scrollbar) live in `globals.css @layer components`. Host-only keyboard shortcuts added (Space play/pause, ←/→ seek). **Synchronization changed: none** — HostPlayer/GuestPlayer only re-render around the new stage; each gained local `duration` state, and host `ProgressBar` seek reuses the existing `handleSeek` → `onSeek` Socket.IO SEEK path (no new POST). Queue rows are display-only. Build + smoke tests pass (create/join/queue/play/pause/next/previous/progress/pages/socket handshake).
-> **Purpose:** Persistent memory for any AI assistant or engineer picking up this project with zero prior context. Read this fully before touching a single line of code.
+> **Purpose:** Give a new coding session an accurate starting point. Read the current snapshot and `AGENTS.md`, then inspect the source before editing.
+
+## Current Technical Snapshot (2026-11-01)
+
+### Authority and product
+
+Amply is a collaborative YouTube listening room. A host creates a room and shares a six-character code; guests join with a name and code. The host is the default playback authority. Anyone in the room can add YouTube URLs to the shared queue, but guests have no playback controls. The product goal is shared listening; the implementation does not guarantee zero-delay or sample-accurate playback.
+
+Documentation authority:
+
+- `AI_CONTEXT.md`: current technical overview and handoff.
+- `AGENTS.md`: concise repository instructions for coding agents.
+- `CLAUDE.md`: Claude include of `AGENTS.md` (`@AGENTS.md`).
+- `Amply_Backend_Implementation.md`: implemented backend and sync behavior.
+- `DESIGN.md`: current UI implementation and differences from the approved design.
+- `sync research/Amply_UI_UX_Design_Notes.md`: authoritative approved UI/UX direction (v1.0, 2026-10-31).
+- `Amply_UI_UX_Design_Notes (1).md`: retained v0.2 historical draft; not authoritative.
+- `sync research/claude , AMPLY_SYNTHESIS.md`: research and proposals, not implementation requirements.
+- `SOCKET_IO_CHANGES.md`: historical summary of the initial Socket.IO integration; its event/state descriptions predate the current revisioned playback path.
+
+`PROJECT_HANDOFF.md` is tracked and clean but contains older status claims; preserve it and do not treat it as current authority. `PRODUCT.md` exists as an untracked product brief. Preserve it; neither document overrides source code or the approved design reference.
+
+### Stack and runtime
+
+- Next.js 16.3 App Router, React 19.2, TypeScript 5, Tailwind CSS 4, Framer Motion 12, Socket.IO 4.8, Lucide icons.
+- YouTube playback uses the YouTube IFrame API directly. `react-player` remains a dependency but is not the active player implementation.
+- `npm run dev` runs `node server.js`, which hosts Next.js and Socket.IO in one Node process. API handlers and Socket.IO share `global.rooms`.
+- `npm run build` builds Next. `npm run start` runs `next start` and does not start the custom Socket.IO server; do not treat it as the full room runtime.
+- Dynamic route `params` are promises in this Next version. Read the installed Next documentation under `node_modules/next/dist/docs/` before changing route conventions.
+
+### Routes and source map
+
+| Route | Responsibility |
+| --- | --- |
+| `/` | Landing page; host/join entry actions. |
+| `/host-setup` | Collect host name and create a room. |
+| `/join` | Validate code, confirm joining, add participant. |
+| `/host/[code]` | Host room client, polling, Socket.IO, controls. |
+| `/room/[code]` | Guest room client, polling, Socket.IO, read-only player. |
+| `/experiment/host`, `/experiment/client` | Legacy Socket.IO timing experiments; separate from the room playback flow. |
+| `/api/rooms` | Create room. |
+| `/api/rooms/[code]` | Return current room snapshot. |
+| `/api/rooms/[code]/join` | Add participant to the room. |
+| `/api/rooms/[code]/queue` | Resolve title/thumbnail and append a YouTube URL. |
+| `/api/rooms/[code]/player` | Persist playback action, position and normalized progress. |
+
+Directory map: `src/app/` contains public pages and route handlers; `src/components/ui/` contains shared screens/player/queue components; `src/lib/` contains room types/store, YouTube parsing, metadata parsing, clock diagnostics and sync logging; `public/` contains public assets; `design-reference/` and `sync research/` hold reference material. Primary implementation files: `src/lib/store.ts`, `server.js`, `src/app/host/[code]/page.tsx`, `src/app/room/[code]/page.tsx`, `src/components/ui/HostPlayer.tsx`, `src/components/ui/GuestPlayer.tsx`, and `src/components/ui/RoomScreen.tsx`.
+
+### Room lifecycle, participants and queue
+
+Room creation generates a collision-checked uppercase alphanumeric code and stores the host as the first member. The join screen first fetches the room for confirmation, then posts the guest name to `/join`; the guest room route separately joins the Socket.IO room and polls the full state. The Socket.IO `JOIN_ROOM` handler does not send an initial room snapshot.
+
+`RoomData` in `src/lib/store.ts` contains `hostName`, `members`, `queue`, `currentSongIndex`, `currentTrackId`, `isPlaying`, normalized `progress`, authoritative `positionSeconds`, timestamps, and monotonically increasing `revision`. `QueueItem` contains `id`, URL, oEmbed title and YouTube thumbnail URL. The store is an in-memory global `Map`, not durable or multi-instance safe. Room cleanup runs when creating a room; guest removal/leave cleanup is not implemented.
+
+The queue API permits adding a track from a participant client. Adding the first track selects it, resets position, starts the room and increments revision. Later queue additions do not change playback state or broadcast a socket event; room pages learn queue changes through polling. Titles come from YouTube oEmbed with a fallback; thumbnail fallback is `maxresdefault` to `hqdefault` to `mqdefault`. `parseTrackMetadata` heuristically splits title/artist for display; it is not authoritative metadata.
+
+### Playback authority and synchronization
+
+The host's YouTube IFrame `getCurrentTime()` is the playback-time source. `PlaybackOrbit` animates and displays `played`/`duration`; it is not an authoritative clock.
+
+1. The host reads actual seconds and duration from its IFrame. While playing, it samples about once per second, computes normalized progress for UI compatibility, and posts `{ positionSeconds, progress, trackId }`. The host serializes these HTTP writes so an earlier progress sample cannot arrive after a later control action.
+2. Host Play/Pause changes the host IFrame optimistically, captures actual current time, posts action + seconds + progress + track ID, and emits the corresponding Socket.IO event after the API response supplies the committed revision. Seek uses the requested IFrame position, persists it, then emits `SEEK` with the committed revision.
+3. The player API updates `isPlaying` for play/pause, preserves it for seek, stores seconds and normalized progress, checks track identity, and increments revision for accepted updates. A progress-only write while paused is ignored.
+4. The server does not trust a socket payload as room state. For `PLAY`, `PAUSE` or `SEEK`, it broadcasts a canonical `PLAYBACK_UPDATE` only when the payload revision exactly matches the current stored revision. The snapshot includes revision, track index/ID, position seconds, progress and play state.
+5. `NEXT`/`PREVIOUS` are handled in `server.js`: update track identity/index, reset position/progress, increment revision and emit `PLAYBACK_COMMAND`. They preserve the room's play/pause state when moving to another track; advancing past the last track stops playback. Host UI observes the result through its two-second room poll because the server emits to other sockets, not the sender.
+6. A guest receives its initial state from the first `GET /api/rooms/[code]` response, not `JOIN_ROOM`. It initializes the primary IFrame only after room data and YouTube API readiness. The player starts with an empty video ID; the current video is cued with `cueVideoById`, not implicitly started by track loading.
+7. After `CUED`, the guest uses the latest desired state, seeks to authoritative seconds, then calls `playVideo()` only when `isPlaying` is true; otherwise it calls `pauseVideo()`. Incoming play, pause and seek updates follow the same seek-before-state path. Guests subscribe to both `PLAYBACK_UPDATE` and `PLAYBACK_COMMAND` and do not emit host playback commands.
+8. Host and guest poll room state every two seconds. Client refs reject snapshots with a lower revision; guests also reject socket commands whose revision is not newer and preserve a newer socket command if it arrives before the first snapshot. Polling remains necessary for queue/member changes and host receipt of navigation state.
+
+Socket events in active room playback: `JOIN_ROOM`, `PLAY`, `PAUSE`, `SEEK`, `NEXT`, `PREVIOUS`, `PLAYBACK_UPDATE`, and `PLAYBACK_COMMAND`. `ROOM_SYNC` is diagnostic. `CLOCK_SYNC` returns `t1`/`t2` for an NTP-style diagnostic estimator in `src/lib/clock-sync.ts`; this estimate is not consumed by playback or used to schedule a common future start.
+
+### YouTube lifecycle, UI and permissions
+
+`HostPlayer` and `GuestPlayer` each maintain a primary and hidden pre-cue IFrame, readiness/generation guards, and local played/duration values. Host cold track changes use `loadVideoById` while playing and `cueVideoById` while paused; the hidden host pre-cue player loads muted. Guest track changes cue without starting; its hidden pre-cue player also cues and never intentionally starts. The guest waits for `CUED`, rejects a callback for an obsolete video ID, then seeks and applies state. YouTube/browser autoplay restrictions can still prevent `playVideo()` from starting; there is no guest click-to-enable recovery UI.
+
+`RoomScreen` is presentational: `Topbar`, `VinylRecord`, `PlaybackOrbit`, track/artwork, `QueuePanel`, and `PlaybackControls`. Guests receive a disabled playback control group plus “Only the host can control playback.” This is a UI permission, not server authorization: socket handlers accept client-supplied room/role fields without authenticating that the sender is the host. Queue endpoints likewise have no account-level authorization.
+
+Current visual source is `src/app/globals.css`: cream `#f7f3e7`, ink `#080808`, coral `#d94135`, blue-violet `#465fb0`, IBM Plex Mono and Inter. The current room layout uses a left vinyl/orbit section and right track/artwork/queue/control section, stacked on narrow screens with a collapsible queue. It partially implements, but does not fully match, approved v1.0. See `DESIGN.md`; do not infer approved design from current source.
+
+### Limitations and known bugs
+
+- YouTube IFrame playback is asynchronous and browser/network dependent. The current architecture synchronizes state/position but has no scheduled common start, clock compensation, or guarantee of zero audible skew.
+- The reported independent guest playback bug was traced to guest `loadVideoById()` starting on track changes, missing pause-position persistence, action-only play/pause commands, ignored guest seeks, missing `PLAYBACK_COMMAND` subscription and unguarded poll/socket ordering. The current source addresses these with persisted seconds, cue-before-play, revisioned state snapshots and lower-revision rejection; real YouTube verification remains outstanding.
+- Host Play/Pause waits for the state POST before emitting Socket.IO. Room/queue polling is two seconds; newly added tracks and host-observed Next/Previous may therefore lag. The supplied 2026-11-01 server sample showed a 16 ms player POST and 4 ms between persisted Pause and server socket receipt, which does not explain multi-second playback delay. Client-side YouTube timing still needs separate measurement.
+- Actual YouTube multi-browser synchronization has not been established by checked-in tests. `test-results/.last-run.json` says `status: failed` with no failed-test details; `package.json` has no test script. Do not mark the scenarios below verified from code presence or build success.
+- A browser hydration warning showed `bis_skin_checked="1"` added to many DOM nodes, absent from server markup. This points to browser extension DOM injection (often security/browser tooling); verify in a clean profile before changing app rendering.
+- Room state is volatile and single-process. No host authentication, guest cleanup, playback retry UI, or autoplay recovery UI exists.
+- Existing global ESLint failures are documented separately in the handoff; avoid unrelated cleanup.
+
+### Testing record
+
+| Scenario | Expected | Evidence/status |
+| --- | --- | --- |
+| Guest joins while host is playing | Same track/position; guest plays | Not tested in the mock session or checked-in tests. |
+| Guest joins while host is paused | Same track/position; guest stays paused | Passed in a two-page browser test with a YouTube IFrame API test double: guest cued the track at 71s and remained paused. Real YouTube playback was blocked by IFrame error 5 in this environment. |
+| Host pause / resume | Guest seeks to authoritative seconds, then pauses/plays | Passed with the test double: guest resumed from 71s; a later pause synchronized both mocked players at 78s. Not verified with real YouTube. |
+| Host UI seek while playing / paused | Guest seeks; play state is preserved | Host UI seek not tested. Paused seek API + guest poll reconciliation passed with the test double at 45s, remaining paused. Not verified with real YouTube. |
+| Next / Previous while paused | Correct track, zero position, room stays paused | Passed with the test double in two pages; both directions loaded/cued the expected track at zero and remained paused. |
+| Guest refresh / reconnect | Latest HTTP room snapshot is applied | Not tested. |
+| Multiple guests | Every guest follows the same revision | Not tested. |
+| Stale or delayed updates | Lower revisions are ignored | Not directly tested. |
+
+Automated checks currently available: `npx tsc --noEmit`, `npm run build`, `npm run lint`. There is no package test script. `test-results/.last-run.json` is the only file in `test-results` and does not identify a test case.
+
+Latest implementation checks completed before this documentation audit: `npx tsc --noEmit` passed; `npm run build` passed; `node --check server.js` passed. Workspace `npm run lint` failed with 601 findings (111 errors, 490 warnings); scoped lint also reports substantial pre-existing issues in the legacy player/component structure. A real YouTube attempt rendered an IFrame error 5 / unsupported media API in the integrated browser, so mocked results above are control-flow checks only, not confirmation of audible synchronization.
+
+### Development and change constraints
+
+```powershell
+npm run dev
+npx tsc --noEmit
+npm run build
+npm run lint
+```
+
+Keep playback changes in the playback/state/socket slices; keep visual work in the design/UI slice. Preserve the single host authority, guest read-only playback controls, shared queue, current Next/Previous behavior and YouTube ID extraction. Do not add Redis, dependencies, clock-driven playback architecture, or redesign the UI unless the task specifically authorizes it. Inspect the worktree and read the matching Next 16 docs before code edits. Never discard existing dirty or untracked work.
+
+## Historical Notes (2026-10-23 and earlier)
+
+The numbered technical notes below are retained for history, but many describe superseded routes, components, fonts and synchronization behavior. They are not current implementation facts. Use the snapshot above and inspect source before relying on any older statement.
 
 ---
 
@@ -538,6 +657,26 @@ npm run build   # Production build
 npm run start   # Start production server (after build)
 npm run lint    # ESLint
 ```
+
+## NEXT DEVELOPMENT SESSION — START HERE
+
+**Current status:** Amply is a working in-memory collaborative YouTube room with host-controlled playback, guest receivers, a shared queue and an editorial UI that only partially matches the approved visual design. Do not treat the product as complete or promise zero audible delay.
+
+**Last completed work:** The playback path was changed to persist YouTube IFrame seconds, revision playback updates, cue guest tracks before applying play state, and reject lower-revision snapshots/commands. Current source lives in `HostPlayer.tsx`, `GuestPlayer.tsx`, the host/guest room pages, room API handlers and `server.js`. The UI implementation was moved to `RoomScreen`, `VinylRecord` and `PlaybackOrbit`; `NowPlayingStage`, `PlayerArt` and `ProgressBar` are deleted in the current worktree.
+
+**Known issues / what remains under test:** Real YouTube multi-browser synchronization is not verified by checked-in tests. Validate guest joins while host is playing and paused, pause/resume, seek in both states, Next/Previous, refresh/reconnect, multiple guests, stale updates and browser autoplay restrictions. A hydration warning involving `bis_skin_checked` likely comes from browser extension DOM injection; confirm in a clean browser profile. Playback latency is not fully explained by server timings; measure host click, POST completion, guest socket receipt, IFrame calls and `PLAYING`/`PAUSED` callbacks separately.
+
+**Next recommended steps:**
+
+1. Inspect `git status --short` and preserve existing dirty/untracked work.
+2. Run `npm run dev`, then perform real host/guest browser tests with YouTube playback enabled.
+3. Capture client-side diagnostic timestamps and compare them with server `seq`/revision events; do not infer playback timing from HTTP logs alone.
+4. Fix only confirmed synchronization defects, then update the scenario matrix here and in `Amply_Backend_Implementation.md`.
+5. Continue visual work against `sync research/Amply_UI_UX_Design_Notes.md`; record implementation differences in `DESIGN.md`.
+
+**Commands:** `npm run dev` starts the custom Next.js + Socket.IO server. Validate with `npx tsc --noEmit` and `npm run build`. `npm run lint` currently has a substantial existing error backlog. There is no `npm test` script. `npm run start` uses `next start`, not the Socket.IO custom server.
+
+**Do not change without a task-specific reason:** Host remains the playback authority; guests do not get playback controls. Preserve the shared queue, current Next/Previous behavior, YouTube IFrame ID extraction, room revision handling and approved v1.0 visual direction. Do not change `RoomScreen` composition, `VinylRecord`, `PlaybackOrbit`, track metadata or queue layout as part of a playback-only fix. Do not add a new clock architecture, Redis or dependencies without explicit scope.
 
 ### Development workflow (updated)
 

@@ -12,8 +12,10 @@ export interface RoomData {
   members: Participant[];
   queue: QueueItem[];
   currentSongIndex: number;
+  currentTrackId: string | null;
   isPlaying: boolean;
   progress: number;
+  positionSeconds: number;
   createdAt: number;
   lastActivity: number;
   /** Monotonically increasing revision for playback-affecting commands. */

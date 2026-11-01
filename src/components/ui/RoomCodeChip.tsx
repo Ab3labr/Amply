@@ -14,16 +14,18 @@ export function RoomCodeChip({ code }: RoomCodeChipProps) {
   };
 
   return (
-    <div className="flex items-center gap-2.5 rounded-full border border-border-subtle bg-surface py-[7px] pl-4 pr-2.5 max-[640px]:pl-[13px] max-[640px]:pr-2 max-[640px]:gap-2">
-      <span className="font-body text-[15px] uppercase tracking-[0.14em] text-primary tabular-nums max-[640px]:text-sm max-[640px]:tracking-[0.12em]">
+    <div className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface/70 py-1.5 pl-3.5 pr-1.5">
+      <span className="font-mono text-[12px] uppercase tracking-[0.14em] text-primary tabular-nums">
         {code}
       </span>
       <button
+        type="button"
         onClick={handleCopy}
         aria-label="Copy room code"
-        className="grid h-[30px] w-[30px] place-items-center rounded-full text-secondary transition-colors duration-200 hover:bg-surface-2 hover:text-primary active:translate-y-px max-[640px]:h-9 max-[640px]:w-9"
+        title="Copy room code"
+        className="grid h-7 w-7 place-items-center rounded-full text-secondary transition-colors duration-200 hover:bg-surface-2 hover:text-primary active:translate-y-px"
       >
-        <Copy size={15} strokeWidth={1.8} />
+        <Copy size={13} strokeWidth={1.8} />
       </button>
     </div>
   );

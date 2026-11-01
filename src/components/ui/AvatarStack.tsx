@@ -21,9 +21,9 @@ export function AvatarStack({ members }: AvatarStackProps) {
   const hostPresent = members.some((m) => m.isHost);
 
   return (
-    <div className="flex items-center gap-3.5">
+    <div className="flex items-center gap-3">
       {hostPresent && (
-        <span className="rounded-full border border-border-subtle px-2.5 py-1.5 text-[10px] uppercase tracking-[0.14em] text-secondary max-[640px]:hidden">
+        <span className="hidden rounded-full border border-border-subtle px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-secondary sm:inline-flex">
           Host
         </span>
       )}
@@ -36,25 +36,33 @@ export function AvatarStack({ members }: AvatarStackProps) {
             <div
               key={member.id}
               title={member.isHost ? `${member.name} (host)` : member.name}
-              className="relative -ml-2 grid h-8 w-8 place-items-center rounded-full border-2 border-background bg-surface-2 text-[12px] font-semibold tracking-[0.02em] text-primary first:ml-0 max-[900px]:h-7 max-[900px]:w-7 max-[900px]:-ml-1.5 max-[900px]:text-[11px]"
+              className={`relative -ml-2 grid h-8 w-8 place-items-center rounded-full border-2 text-[11px] font-medium tracking-[0.02em] text-primary first:ml-0 ${
+                member.isHost
+                  ? "border-coral-text/50 bg-surface"
+                  : "border-background bg-surface-2"
+              }`}
             >
               {initials(member.name)}
               {!member.isHost && connected && (
-                <span className="absolute -right-px -bottom-px h-[9px] w-[9px] rounded-full border-2 border-background bg-success max-[900px]:h-2 max-[900px]:w-2" />
+                <span className="absolute -bottom-px -right-px h-2 w-2 rounded-full border-2 border-background bg-success" />
               )}
             </div>
           );
         })}
         {overflow > 0 && (
-          <div className="grid h-8 w-8 -ml-[2px] place-items-center rounded-full border-2 border-background bg-surface-2 text-[12px] font-semibold tracking-[0.02em] text-secondary max-[900px]:h-7 max-[900px]:w-7 max-[900px]:-ml-1.5 max-[900px]:text-[11px]">
+          <div className="-ml-2 grid h-8 w-8 place-items-center rounded-full border-2 border-background bg-surface-2 text-[11px] font-medium text-secondary">
             +{overflow}
           </div>
         )}
       </div>
 
       {members.length > 0 && (
-        <span className="font-body text-[12px] tracking-[0.06em] text-secondary tabular-nums max-[900px]:text-[11px]">
-          {members.length} in the room
+        <span
+          aria-label={`${members.length} in the room`}
+          className="font-mono text-[11px] tracking-[0.04em] text-secondary tabular-nums"
+        >
+          {members.length}
+          <span className="hidden sm:inline"> in the room</span>
         </span>
       )}
     </div>

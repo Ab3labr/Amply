@@ -4,40 +4,58 @@ import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
 interface PlaybackControlsProps {
   isPlaying: boolean;
+  disabled?: boolean;
   onPlayPause?: () => void;
   onPrev?: () => void;
   onNext?: () => void;
+  className?: string;
 }
 
-export function PlaybackControls({ isPlaying, onPlayPause, onPrev, onNext }: PlaybackControlsProps) {
+export function PlaybackControls({
+  isPlaying,
+  disabled = false,
+  onPlayPause,
+  onPrev,
+  onNext,
+  className = "",
+}: PlaybackControlsProps) {
   return (
-    <div className="flex items-center justify-center gap-3.5 max-[640px]:gap-3">
+    <div className={`flex items-center justify-center gap-5 sm:gap-7 ${className}`}>
       <button
+        type="button"
         onClick={onPrev}
+        disabled={disabled}
         aria-label="Previous track"
-        className="grid h-[46px] w-[46px] place-items-center rounded-full border border-border-subtle text-primary transition-[background-color,border-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-surface-2 hover:border-border-strong active:translate-y-px active:scale-[0.97] max-[640px]:h-11 max-[640px]:w-11"
+        title={disabled ? "Only the host can control playback." : "Previous track"}
+        className="grid h-11 w-11 place-items-center rounded-full text-primary transition-[opacity,transform,background-color] duration-200 hover:bg-primary/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
       >
-        <SkipBack size={20} strokeWidth={1.8} />
+        <SkipBack size={24} strokeWidth={1.6} />
       </button>
 
       <button
+        type="button"
         onClick={onPlayPause}
+        disabled={disabled}
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="grid h-[72px] w-[72px] place-items-center rounded-full bg-accent text-[oklch(14%_0.02_50)] shadow-[0_14px_30px_-12px_oklch(72%_0.11_28_/_0.45)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-accent-hi hover:shadow-[0_16px_34px_-12px_oklch(80%_0.09_30_/_0.5)] active:translate-y-px active:scale-[0.97] max-[640px]:h-16 max-[640px]:w-16"
+        title={disabled ? "Only the host can control playback." : isPlaying ? "Pause" : "Play"}
+        className="grid h-[68px] w-[68px] place-items-center rounded-full bg-primary text-background transition-[opacity,transform,background-color] duration-200 hover:bg-primary/85 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary disabled:active:scale-100 sm:h-[72px] sm:w-[72px]"
       >
         {isPlaying ? (
-          <Pause size={26} fill="currentColor" className="scale-110" />
+          <Pause size={25} strokeWidth={1.8} fill="currentColor" className="scale-110" />
         ) : (
-          <Play size={26} fill="currentColor" className="ml-0.5" />
+          <Play size={25} strokeWidth={1.8} fill="currentColor" className="ml-0.5" />
         )}
       </button>
 
       <button
+        type="button"
         onClick={onNext}
+        disabled={disabled}
         aria-label="Next track"
-        className="grid h-[46px] w-[46px] place-items-center rounded-full border border-border-subtle text-primary transition-[background-color,border-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-surface-2 hover:border-border-strong active:translate-y-px active:scale-[0.97] max-[640px]:h-11 max-[640px]:w-11"
+        title={disabled ? "Only the host can control playback." : "Next track"}
+        className="grid h-11 w-11 place-items-center rounded-full text-primary transition-[opacity,transform,background-color] duration-200 hover:bg-primary/5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
       >
-        <SkipForward size={20} strokeWidth={1.8} />
+        <SkipForward size={24} strokeWidth={1.6} />
       </button>
     </div>
   );

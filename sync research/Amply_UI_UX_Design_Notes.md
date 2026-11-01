@@ -9,6 +9,8 @@ This is the authoritative UI/UX reference for the Amply redesign. It describes t
 
 The document is intentionally detailed so that another AI coding agent or designer can use it as the primary UI/UX reference without reconstructing decisions from previous conversations.
 
+> **Implementation status audit (2026-11-01):** This remains the approved visual direction; the app implements only part of it. Current source has the cream/ink/coral palette, black vinyl, separate progress orbit, separate thumbnail artwork, responsive right-side queue and host/guest room layout. The landing background is CSS gradients rather than the approved painterly wave; player scale, title treatment, queue detail and other differences are recorded in `DESIGN.md`. This status note does not change or supersede any approved design decisions below.
+
 ---
 
 ## 1. Document Status, Version and Changelog

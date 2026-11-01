@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { QueueItem } from "@/lib/store";
 import { getYouTubeVideoId } from "@/lib/youtube";
-import { NowPlayingStage } from "@/components/ui/NowPlayingStage";
+import { RoomScreen } from "@/components/ui/RoomScreen";
+import { Participant } from "@/components/ui/ParticipantItem";
 import { diag, nextSeq } from "@/lib/sync-diag";
 
 declare global {
@@ -26,28 +27,72 @@ function ytStateName(state: number): string {
   return YT_STATE_NAMES[state] ?? `UNKNOWN(${state})`;
 }
 
+function clampFraction(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function postRoomUpdate(
+  code: string,
+  queue: { current: Promise<void> },
+  body: Record<string, unknown>
+): Promise<Response> {
+  const request = queue.current.then(() =>
+    fetch(`/api/rooms/${code}/player`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  queue.current = request.then(() => undefined, () => undefined);
+  return request;
+}
+
 interface HostPlayerProps {
   code: string;
   queue: QueueItem[];
   currentSongIndex: number;
+  currentTrackId?: string | null;
+  positionSeconds?: number;
   isPlaying: boolean;
-  onPlay?: (seq?: number) => void;
-  onPause?: (seq?: number) => void;
-  onSeek?: (position: number, seq?: number) => void;
+  members?: Participant[];
+  hostName?: string;
+  loading?: boolean;
+  onLeave?: () => void;
+  onPlay?: (positionSeconds: number, revision: number, seq?: number) => void;
+  onPause?: (positionSeconds: number, revision: number, seq?: number) => void;
+  onSeek?: (positionSeconds: number, revision: number, seq?: number) => void;
   onNext?: (seq?: number) => void;
   onPrevious?: (seq?: number) => void;
 }
 
-export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, onPause, onSeek, onNext, onPrevious }: HostPlayerProps) {
+export function HostPlayer({
+  code,
+  queue,
+  currentSongIndex,
+  currentTrackId,
+  positionSeconds = 0,
+  isPlaying,
+  members = [],
+  hostName,
+  loading = false,
+  onLeave,
+  onPlay,
+  onPause,
+  onSeek,
+  onNext,
+  onPrevious,
+}: HostPlayerProps) {
   try {
     console.log('[HostPlayer] Component render - Props:', { code, queueLength: queue.length, currentSongIndex, isPlaying });
 
     const [played, setPlayed] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [isBuffering, setIsBuffering] = useState(false);
     const playerRef = useRef<any>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [playerReady, setPlayerReady] = useState(false);
     const [playerInstanceReady, setPlayerInstanceReady] = useState(false);
+    const authoritativePositionRef = useRef(positionSeconds);
 
     // Generation counter: every time a player is destroyed/recreated we bump it.
     // Callbacks (onReady/onStateChange) from a replaced player can fire after the
@@ -60,6 +105,18 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     const lastSyncTimeRef = useRef<number>(0);
     const lastSyncedProgressRef = useRef<number>(0);
     const lastDiagPlayRef = useRef<boolean | null>(null);
+    const roomUpdateQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const optimisticPlayingRef = useRef<boolean | null>(null);
+    const desiredPlayingRef = useRef(isPlaying);
+
+    useEffect(() => {
+      authoritativePositionRef.current = positionSeconds;
+    }, [positionSeconds]);
+
+    useEffect(() => {
+      if (optimisticPlayingRef.current === isPlaying) optimisticPlayingRef.current = null;
+      desiredPlayingRef.current = optimisticPlayingRef.current ?? isPlaying;
+    }, [isPlaying]);
 
     // Pre-cue player: hidden second player that pre-loads the next song
     // so that when NEXT is pressed the video is already buffered.
@@ -72,6 +129,31 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
 
     const currentSong = queue[currentSongIndex];
     const nextSong = queue[currentSongIndex + 1];
+    const [displayedTrackId, setDisplayedTrackId] = useState(currentSong?.id);
+
+    if (displayedTrackId !== currentSong?.id) {
+      setDisplayedTrackId(currentSong?.id);
+      setPlayed(0);
+      setDuration(0);
+      setIsBuffering(false);
+    }
+
+    const syncVisualPosition = () => {
+      try {
+        const player = playerRef.current;
+        if (!player) return;
+        const nextDuration = player.getDuration?.();
+        if (Number.isFinite(nextDuration) && nextDuration > 0) {
+          setDuration((prev) =>
+            Math.abs(prev - nextDuration) > 0.5 ? nextDuration : prev
+          );
+          const currentTime = player.getCurrentTime?.();
+          if (Number.isFinite(currentTime)) {
+            setPlayed(clampFraction(currentTime / nextDuration));
+          }
+        }
+      } catch {}
+    };
 
     // Component mount/unmount logging
     useEffect(() => {
@@ -171,44 +253,23 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
               diag("PLAYER", code, "player", "ready", { role: "host", videoId, index: currentSongIndex, gen: generation });
               playerRef.current = event.target as any;
               setPlayerInstanceReady(true);
+              setIsBuffering(false);
 
               const readyDuration = playerRef.current?.getDuration?.();
               if (readyDuration && readyDuration > 0) {
                 setDuration(readyDuration);
               }
 
-              // Recover playback position from server on mount
-              console.log('[HostPlayer] Recovering playback position from server');
-              fetch(`/api/rooms/${code}`)
-                .then(res => res.json())
-                .then(room => {
-                  if (room && room.progress > 0 && playerRef.current) {
-                    console.log('[HostPlayer] Seeking to server progress:', room.progress);
-                    const duration = playerRef.current.getDuration();
-                    if (duration > 0) {
-                      playerRef.current.seekTo(room.progress * duration, true);
-                      setPlayed(room.progress);
-                      diag("PLAYER", code, "seek", "apply", {
-                        role: "host",
-                        cause: "recovery",
-                        positionSec: room.progress * duration,
-                      });
-                    }
-                  }
-                })
-                .catch(error => {
-                  console.error('[HostPlayer] Error fetching room state for recovery:', error);
+              const recoveredPosition = Number.isFinite(authoritativePositionRef.current)
+                ? authoritativePositionRef.current
+                : 0;
+              if (recoveredPosition > 0) {
+                playerRef.current?.seekTo(recoveredPosition, true);
+                diag("PLAYER", code, "seek", "apply", {
+                  role: "host",
+                  cause: "recovery",
+                  positionSec: recoveredPosition,
                 });
-
-              if (isPlaying) {
-                console.log('[HostPlayer] Auto-playing video (isPlaying=true)');
-                diag("HOST", code, "PLAY", "autoplay-playVideo", { cause: "onReady" });
-                diag("PLAYER", code, "play", "request", { role: "host", cause: "onReady-autoplay", videoId });
-                try {
-                  playerRef.current?.playVideo();
-                } catch (error) {
-                  console.error('[HostPlayer] Error calling playVideo in onReady:', error);
-                }
               }
             } catch (error) {
               console.error('[HostPlayer] Error in onReady callback:', error);
@@ -240,12 +301,21 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
               if (event.data === window.YT.PlayerState.ENDED) {
                 console.log('[HostPlayer] Song ended, calling handleNext');
                 diag("HOST", code, "ENDED", "yt-ended", { index: currentSongIndex, t: performance.now().toFixed(2) });
+                setIsBuffering(false);
                 handleNext();
               } else if (event.data === window.YT.PlayerState.PLAYING) {
+                setIsBuffering(false);
                 diag("HOST", code, "PLAY", "yt-playing", { t: performance.now().toFixed(2), index: currentSongIndex });
+              } else if (event.data === window.YT.PlayerState.PAUSED) {
+                setIsBuffering(false);
+                syncVisualPosition();
+                diag("HOST", code, "PAUSE", "yt-paused", {});
               } else if (event.data === window.YT.PlayerState.BUFFERING) {
+                setIsBuffering(true);
+                syncVisualPosition();
                 diag("HOST", code, "BUFFERING", "yt-buffering", { t: performance.now().toFixed(2) });
               } else if (event.data === window.YT.PlayerState.CUED) {
+                setIsBuffering(false);
                 diag("HOST", code, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
               }
             } catch (error) {
@@ -404,9 +474,9 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       try { playerRef.current.pauseVideo(); } catch {}
       try { playerRef.current.mute(); } catch {}
 
-      // Unmute and play the pre-cue player
+      // Swap without starting; the room's playback state is applied below.
+      try { preCuePlayerRef.current.pauseVideo(); } catch {}
       try { preCuePlayerRef.current.unMute(); } catch {}
-      try { preCuePlayerRef.current.playVideo(); } catch {}
 
       // Swap refs
       const oldPrimary = playerRef.current;
@@ -419,6 +489,12 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       try { oldPrimary.destroy(); } catch {}
 
       prevVideoIdRef.current = newVideoId;
+      try { playerRef.current.seekTo(positionSeconds, true); } catch {}
+      if (isPlaying) {
+        try { playerRef.current.playVideo(); } catch {}
+      } else {
+        try { playerRef.current.pauseVideo(); } catch {}
+      }
       preCueSwappingRef.current = false;
       diag("HOST", code, "player", "pre-cue-swap-done", {
         t: performance.now().toFixed(2),
@@ -444,9 +520,13 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       });
 
       prevVideoIdRef.current = newVideoId;
-      playerRef.current.loadVideoById(newVideoId);
+      if (isPlaying) {
+        playerRef.current.loadVideoById({ videoId: newVideoId, startSeconds: positionSeconds });
+      } else {
+        playerRef.current.cueVideoById({ videoId: newVideoId, startSeconds: positionSeconds });
+      }
     }
-  }, [currentSong?.url, currentSongIndex, playerInstanceReady, code]);
+  }, [currentSong?.url, currentSongIndex, currentTrackId, positionSeconds, isPlaying, playerInstanceReady, code]);
 
   // Control playback
   useEffect(() => {
@@ -512,6 +592,7 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       console.log('[HostPlayer] Starting progress sync interval (1000ms)');
       const interval = setInterval(() => {
         try {
+          if (!desiredPlayingRef.current) return;
           if (playerRef.current && playerRef.current.getCurrentTime && playerRef.current.getDuration) {
             const currentTime = playerRef.current.getCurrentTime();
             const duration = playerRef.current.getDuration();
@@ -531,10 +612,10 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
 
                 console.log('[HostPlayer] Syncing progress to server:', progress.toFixed(3));
                 diag("HOST", code, "progress", "post", { progress });
-                fetch(`/api/rooms/${code}/player`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ progress }),
+                postRoomUpdate(code, roomUpdateQueueRef, {
+                    progress: clampFraction(progress),
+                    positionSeconds: currentTime,
+                    trackId: currentSong?.id,
                 }).catch((error) => {
                   if (!(error instanceof Error) || error.name !== 'AbortError') {
                     console.error('[HostPlayer] Progress sync error:', error);
@@ -556,13 +637,15 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
       console.error('[HostPlayer] Error in progress sync useEffect:', error);
       return () => {};
     }
-  }, [isPlaying, playerInstanceReady, code]);
+  }, [isPlaying, playerInstanceReady, code, currentSong?.id]);
 
   const handlePlayPause = async () => {
     console.log('[HostPlayer] handlePlayPause called', { isPlaying });
     const seq = nextSeq();
     const clickAt = performance.now();
     const action = isPlaying ? "PAUSE" : "PLAY";
+    optimisticPlayingRef.current = !isPlaying;
+    desiredPlayingRef.current = !isPlaying;
     diag("HOST", code, action, "click", { seq });
     try {
       // Optimistically drive the host's own player at click time so the host
@@ -589,30 +672,28 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
         diag("PLAYER", code, isPlaying ? "pause" : "play", "ignored-not-ready", { role: "host", cause: "click" });
       }
 
-      if (isPlaying) {
-        console.log('[HostPlayer] Calling onPause callback');
-        try {
-          onPause?.(seq);
-        } catch (error) {
-          console.error('[HostPlayer] Error in onPause callback:', error);
-        }
-      } else {
-        console.log('[HostPlayer] Calling onPlay callback');
-        try {
-          onPlay?.(seq);
-        } catch (error) {
-          console.error('[HostPlayer] Error in onPlay callback:', error);
-        }
-      }
+      const currentTime = playerRef.current?.getCurrentTime?.() ?? positionSeconds;
+      const currentDuration = playerRef.current?.getDuration?.() ?? duration;
+      const progress = currentDuration > 0 ? currentTime / currentDuration : 0;
 
       console.log('[HostPlayer] Sending play/pause to server');
-      const res = await fetch(`/api/rooms/${code}/player`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: isPlaying ? "pause" : "play", seq }),
+      const res = await postRoomUpdate(code, roomUpdateQueueRef, {
+          action: isPlaying ? "pause" : "play",
+          positionSeconds: currentTime,
+          progress: clampFraction(progress),
+          trackId: currentSong?.id,
+          seq,
       });
       diag("HOST", code, action, "api-response", { seq, status: res.status });
+      if (!res.ok) return;
+      const result = await res.json();
+      const committedRevision = result.room?.revision;
+      if (!Number.isFinite(committedRevision)) return;
+      if (isPlaying) onPause?.(currentTime, committedRevision, seq);
+      else onPlay?.(currentTime, committedRevision, seq);
     } catch (error) {
+      optimisticPlayingRef.current = null;
+      desiredPlayingRef.current = isPlaying;
       console.error('[HostPlayer] handlePlayPause error:', error);
       if (!(error instanceof Error) || error.name !== 'AbortError') {
         console.error('[HostPlayer] Play/pause error:', error);
@@ -620,7 +701,7 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     }
   };
 
-  const handleSeek = (fraction: number) => {
+  const handleSeek = async (fraction: number) => {
     // UI-only seek: drive the host's own player directly and relay the position
     // through the existing onSeek callback (Socket.IO SEEK). No new sync path.
     if (!playerRef.current || !playerInstanceReady) {
@@ -648,7 +729,18 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     }
 
     try {
-      onSeek?.(position, seq);
+      const res = await postRoomUpdate(code, roomUpdateQueueRef, {
+          action: "seek",
+          positionSeconds: position,
+          progress: clampFraction(fraction),
+          trackId: currentSong?.id,
+          seq,
+      });
+      if (!res.ok) return;
+      const result = await res.json();
+      if (Number.isFinite(result.room?.revision)) {
+        onSeek?.(position, result.room.revision, seq);
+      }
     } catch (error) {
       console.error('[HostPlayer] Error calling onSeek in handleSeek:', error);
     }
@@ -711,12 +803,19 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
     <>
       <div ref={containerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
       <div ref={preCueContainerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
-      <NowPlayingStage
+      <RoomScreen
         variant="host"
-        currentSong={currentSong ?? null}
+        code={code}
+        queue={queue}
+        currentSongIndex={currentSongIndex}
         isPlaying={isPlaying}
+        isBuffering={isBuffering}
         played={played}
         duration={duration}
+        hostName={hostName}
+        members={members}
+        loading={loading}
+        onLeave={() => onLeave?.()}
         onPlayPause={handlePlayPause}
         onPrev={handlePrevious}
         onNext={handleNext}
@@ -727,9 +826,11 @@ export function HostPlayer({ code, queue, currentSongIndex, isPlaying, onPlay, o
   } catch (error) {
     console.error('[HostPlayer] Error in render:', error);
     return (
-      <div className="w-full p-6 bg-red-900/20 border border-red-500/50 rounded-[24px]">
-        <h3 className="text-red-400 font-bold mb-2">HostPlayer Render Error</h3>
-        <p className="text-red-300 text-sm">{error instanceof Error ? error.message : String(error)}</p>
+      <div className="w-full rounded-[24px] border border-accent/40 bg-accent/10 p-6">
+        <h3 className="mb-2 font-bold text-coral-text">HostPlayer Render Error</h3>
+        <p className="text-sm text-secondary">
+          {error instanceof Error ? error.message : String(error)}
+        </p>
       </div>
     );
   }

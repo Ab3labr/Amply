@@ -1,5 +1,7 @@
 # Amply — Synthesis: What to Actually Build
 
+> **Status audit (2026-11-01):** This is research synthesis and proposed future architecture, not a record of shipped behavior or an approved implementation mandate. The NTP-style estimator exists in `src/lib/clock-sync.ts`, but playback does not consume it. Scheduled epochs, readiness/admission tiers, playback-rate nudges, acoustic calibration and observer/satellite modes are proposals, not implemented features. The current implemented room synchronization is described in `AI_CONTEXT.md` and `Amply_Backend_Implementation.md`. `PRODUCT.md` is an untracked product brief, not implementation evidence; use source for behavior and `sync research/Amply_UI_UX_Design_Notes.md` for approved visual decisions.
+
 Three independent takes on the same problem, run through Claude, Gemini, and Perplexity. Read together, they're more useful than any one alone — mostly because of where they *agree without coordinating*, and one place where they meaningfully disagree.
 
 ---

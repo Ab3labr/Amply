@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { QueueItem } from "@/lib/store";
 import { getYouTubeVideoId } from "@/lib/youtube";
-import { NowPlayingStage } from "@/components/ui/NowPlayingStage";
+import { RoomScreen } from "@/components/ui/RoomScreen";
+import { Participant } from "@/components/ui/ParticipantItem";
 import { diag } from "@/lib/sync-diag";
 
 declare global {
@@ -26,10 +27,19 @@ function ytStateName(state: number): string {
   return YT_STATE_NAMES[state] ?? `UNKNOWN(${state})`;
 }
 
+function clampFraction(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 export interface SocketCommand {
-  type: "play" | "pause";
-  at: number;
-  seq?: number;
+  type: "play" | "pause" | "seek" | "next" | "previous" | "update";
+  revision: number;
+  songIndex: number;
+  trackId: string | null;
+  positionSeconds: number;
+  progress: number;
+  isPlaying: boolean;
+  seq?: number | null;
 }
 
 interface GuestPlayerProps {
@@ -37,14 +47,33 @@ interface GuestPlayerProps {
   queue: QueueItem[];
   currentSongIndex: number;
   isPlaying: boolean;
-  serverProgress: number;
+  positionSeconds: number;
+  revision: number;
+  currentTrackId: string | null;
   socketCommand?: SocketCommand | null;
   hostName?: string;
+  members?: Participant[];
+  loading?: boolean;
+  onLeave?: () => void;
 }
 
-export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serverProgress, socketCommand, hostName }: GuestPlayerProps) {
+export function GuestPlayer({
+  roomCode,
+  queue,
+  currentSongIndex,
+  isPlaying,
+  positionSeconds,
+  revision,
+  currentTrackId,
+  socketCommand,
+  hostName,
+  members = [],
+  loading = false,
+  onLeave,
+}: GuestPlayerProps) {
   const [played, setPlayed] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isBuffering, setIsBuffering] = useState(false);
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
@@ -54,7 +83,17 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
   // must never re-arm the ready flag with a stale/dead instance.
   const playerGenerationRef = useRef<number>(0);
   const prevVideoIdRef = useRef<string | null>(null);
-  const lastDiagPlayRef = useRef<boolean | null>(null);
+  const loadedTrackRef = useRef<string | null>(null);
+  const waitingForCueRef = useRef(false);
+  const appliedRevisionRef = useRef(-1);
+  const desiredPlaybackRef = useRef({
+    videoId: null as string | null,
+    trackId: null as string | null,
+    positionSeconds: 0,
+    isPlaying: false,
+    revision: -1,
+  });
+  const applyPlaybackRef = useRef<((force?: boolean) => void) | null>(null);
 
   // Pre-cue player: hidden second player that pre-loads the next song
   const preCuePlayerRef = useRef<any>(null);
@@ -62,10 +101,90 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
   const preCueGenerationRef = useRef<number>(0);
   const preCueReadyRef = useRef<boolean>(false);
   const preCueVideoIdRef = useRef<string | null>(null);
-  const preCueSwappingRef = useRef<boolean>(false);
 
   const currentSong = queue[currentSongIndex];
+  const [displayedTrackId, setDisplayedTrackId] = useState(currentSong?.id);
 
+  if (displayedTrackId !== currentSong?.id) {
+    setDisplayedTrackId(currentSong?.id);
+    setPlayed(0);
+    setDuration(0);
+    setIsBuffering(false);
+  }
+
+  const syncVisualPosition = () => {
+    try {
+      const player = playerRef.current;
+      if (!player) return;
+      const nextDuration = player.getDuration?.();
+      if (Number.isFinite(nextDuration) && nextDuration > 0) {
+        setDuration((prev) =>
+          Math.abs(prev - nextDuration) > 0.5 ? nextDuration : prev
+        );
+        const currentTime = player.getCurrentTime?.();
+        if (Number.isFinite(currentTime)) {
+          setPlayed(clampFraction(currentTime / nextDuration));
+        }
+      }
+    } catch {}
+  };
+
+  const applyAuthoritativePlayback = useCallback((force = false) => {
+    let player = playerRef.current;
+    const desired = desiredPlaybackRef.current;
+    if (!player || !playerInstanceReady || !desired.videoId || !desired.trackId) return;
+
+    let trackChanged = false;
+    if (loadedTrackRef.current !== desired.trackId) {
+      trackChanged = true;
+      const canSwapPreCue =
+        preCueReadyRef.current &&
+        preCueVideoIdRef.current === desired.videoId &&
+        preCuePlayerRef.current;
+
+      if (canSwapPreCue) {
+        try { player.pauseVideo(); } catch {}
+        try { player.mute(); } catch {}
+        try { preCuePlayerRef.current.pauseVideo(); } catch {}
+        try { preCuePlayerRef.current.unMute(); } catch {}
+        const oldPrimary = player;
+        playerRef.current = preCuePlayerRef.current;
+        preCuePlayerRef.current = null;
+        preCueReadyRef.current = false;
+        preCueVideoIdRef.current = null;
+        loadedTrackRef.current = desired.trackId;
+        prevVideoIdRef.current = desired.videoId;
+        player = playerRef.current;
+        try { oldPrimary.destroy(); } catch {}
+      } else {
+        loadedTrackRef.current = desired.trackId;
+        prevVideoIdRef.current = desired.videoId;
+        waitingForCueRef.current = true;
+        player.cueVideoById({
+          videoId: desired.videoId,
+          startSeconds: desired.positionSeconds,
+        });
+        return;
+      }
+    }
+
+    if (waitingForCueRef.current) return;
+
+    const currentTime = player.getCurrentTime?.();
+    const drift = Number.isFinite(currentTime)
+      ? Math.abs(currentTime - desired.positionSeconds)
+      : Number.POSITIVE_INFINITY;
+    if (force || trackChanged || !desired.isPlaying || drift > 1.5) {
+      player.seekTo(desired.positionSeconds, true);
+    }
+
+    if (desired.isPlaying) {
+      player.playVideo?.();
+    } else {
+      player.pauseVideo?.();
+    }
+    appliedRevisionRef.current = Math.max(appliedRevisionRef.current, desired.revision);
+  }, [playerInstanceReady]);
   // Load YouTube IFrame API
   useEffect(() => {
     if (!window.YT) {
@@ -82,29 +201,26 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
     }
   }, []);
 
-  // Initialize player (only on first ready — NOT on song changes)
+  // Initialize only after both the room snapshot and IFrame API are ready.
   useEffect(() => {
-    if (!playerReady || !containerRef.current) return;
-    // If a player already exists, song changes are handled by the separate
-    // effect below — we do NOT destroy/recreate here.
+    if (!playerReady || loading || !currentSong || !containerRef.current) return;
+    // Keep the player instance; subsequent track changes are cued in place.
     if (playerRef.current) return;
 
     const generation = playerGenerationRef.current + 1;
     playerGenerationRef.current = generation;
 
-    const guestVideoId = getYouTubeVideoId(currentSong?.url || '');
     diag("GUEST", roomCode, "player", "create", { index: currentSongIndex });
     diag("PLAYER", roomCode, "player", "create", {
       role: "guest",
-      videoId: guestVideoId,
+      videoId: null,
       prevVideoId: prevVideoIdRef.current,
       index: currentSongIndex,
     });
-    prevVideoIdRef.current = guestVideoId || null;
     new window.YT.Player(containerRef.current, {
       height: '200',
       width: '200',
-      videoId: guestVideoId,
+      videoId: '',
       playerVars: {
         autoplay: 0,
         controls: 0,
@@ -117,19 +233,16 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
           if (playerGenerationRef.current !== generation) return;
           playerRef.current = event.target as any;
           setPlayerInstanceReady(true);
+          setIsBuffering(false);
           diag("GUEST", roomCode, "player", "onReady", { index: currentSongIndex });
-          diag("PLAYER", roomCode, "player", "ready", { role: "guest", videoId: guestVideoId, index: currentSongIndex });
+          diag("PLAYER", roomCode, "player", "ready", { role: "guest", videoId: desiredPlaybackRef.current.videoId, index: currentSongIndex });
 
           const readyDuration = playerRef.current?.getDuration?.();
           if (readyDuration && readyDuration > 0) {
             setDuration(readyDuration);
           }
 
-          if (isPlaying) {
-            diag("GUEST", roomCode, "PLAY", "autoplay-playVideo", { cause: "onReady" });
-            diag("PLAYER", roomCode, "play", "request", { role: "guest", cause: "onReady-autoplay", videoId: guestVideoId });
-            playerRef.current?.playVideo();
-          }
+          applyPlaybackRef.current?.(true);
         },
         onStateChange: (event: any) => {
           if (playerGenerationRef.current !== generation) return;
@@ -150,8 +263,10 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
             });
           }
           if (event.data === window.YT.PlayerState.ENDED) {
+            setIsBuffering(false);
             diag("GUEST", roomCode, "ENDED", "yt-ended", { index: currentSongIndex });
           } else if (event.data === window.YT.PlayerState.PLAYING) {
+            setIsBuffering(false);
             const playingAt = performance.now();
             diag("GUEST", roomCode, "PLAY", "yt-playing", { t: playingAt.toFixed(2) });
             setTimeout(() => {
@@ -163,10 +278,19 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
               }
             }, 250);
           } else if (event.data === window.YT.PlayerState.PAUSED) {
+            setIsBuffering(false);
+            syncVisualPosition();
             diag("GUEST", roomCode, "PAUSE", "yt-paused", {});
           } else if (event.data === window.YT.PlayerState.BUFFERING) {
+            setIsBuffering(true);
+            syncVisualPosition();
             diag("GUEST", roomCode, "BUFFERING", "yt-buffering", { t: performance.now().toFixed(2) });
           } else if (event.data === window.YT.PlayerState.CUED) {
+            const cuedVideoId = event.target?.getVideoData?.()?.video_id;
+            if (cuedVideoId && cuedVideoId !== desiredPlaybackRef.current.videoId) return;
+            setIsBuffering(false);
+            waitingForCueRef.current = false;
+            applyPlaybackRef.current?.(true);
             diag("GUEST", roomCode, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
           }
         },
@@ -191,7 +315,7 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
       setPlayerInstanceReady(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerReady]);
+  }, [playerReady, loading, Boolean(currentSong)]);
 
   // Create pre-cue player: a second hidden YT.Player that pre-loads the next
   // song so when the PLAYBACK_COMMAND arrives the video is already buffered.
@@ -224,12 +348,11 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
         onStateChange: (event: any) => {
           if (preCueGenerationRef.current !== generation) return;
           if (event.data === window.YT.PlayerState.PLAYING) {
-            preCueReadyRef.current = true;
-            diag("GUEST", roomCode, "pre-cue", "playing", { videoId: preCueVideoIdRef.current, t: performance.now().toFixed(2) });
-            diag("PLAYER", roomCode, "pre-cue", "buffered", { role: "guest", videoId: preCueVideoIdRef.current });
+            diag("GUEST", roomCode, "pre-cue", "unexpected-playing", { videoId: preCueVideoIdRef.current });
           } else if (event.data === window.YT.PlayerState.BUFFERING) {
             diag("GUEST", roomCode, "pre-cue", "buffering", { videoId: preCueVideoIdRef.current });
           } else if (event.data === window.YT.PlayerState.CUED) {
+            preCueReadyRef.current = true;
             diag("GUEST", roomCode, "pre-cue", "cued", { videoId: preCueVideoIdRef.current });
           }
         },
@@ -273,170 +396,40 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
     diag("PLAYER", roomCode, "pre-cue", "load", { role: "guest", nextVideoId, index: nextIndex });
     preCueReadyRef.current = false;
     preCueVideoIdRef.current = nextVideoId;
-    try { preCuePlayerRef.current.loadVideoById(nextVideoId); } catch {}
+    try { preCuePlayerRef.current.cueVideoById(nextVideoId); } catch {}
   }, [currentSongIndex, queue, roomCode]);
 
-  // Song change: use pre-cue player if available, otherwise fall back to loadVideoById
   useEffect(() => {
-    if (!playerRef.current || !playerInstanceReady) return;
-    const newVideoId = getYouTubeVideoId(currentSong?.url || '');
-    if (!newVideoId) return;
-    if (newVideoId === prevVideoIdRef.current) return;
+    desiredPlaybackRef.current = {
+      videoId: getYouTubeVideoId(currentSong?.url || ''),
+      trackId: currentTrackId ?? currentSong?.id ?? null,
+      positionSeconds: Number.isFinite(positionSeconds) ? Math.max(0, positionSeconds) : 0,
+      isPlaying,
+      revision,
+    };
+    applyPlaybackRef.current = applyAuthoritativePlayback;
+    if (!playerRef.current || !playerInstanceReady || revision < 0) return;
+    if (revision < appliedRevisionRef.current) return;
 
-    const loadAt = performance.now();
-
-    // Check if pre-cue player has this video loaded and ready
-    const canUsePreCue =
-      !preCueSwappingRef.current &&
-      preCueReadyRef.current &&
-      preCueVideoIdRef.current === newVideoId &&
-      preCuePlayerRef.current;
-
-    if (canUsePreCue) {
-      diag("GUEST", roomCode, "player", "pre-cue-swap", {
-        newVideoId,
-        prevVideoId: prevVideoIdRef.current,
-        index: currentSongIndex,
-        t: loadAt.toFixed(2),
-      });
-      diag("PLAYER", roomCode, "player", "song-change", {
-        role: "guest",
-        method: "pre-cue-swap",
-        newVideoId,
-        prevVideoId: prevVideoIdRef.current,
-        index: currentSongIndex,
-        t: loadAt.toFixed(2),
-      });
-
-      preCueSwappingRef.current = true;
-
-      // Pause and mute the old primary player
-      try { playerRef.current.pauseVideo(); } catch {}
-      try { playerRef.current.mute(); } catch {}
-
-      // Unmute and play the pre-cue player
-      try { preCuePlayerRef.current.unMute(); } catch {}
-      try { preCuePlayerRef.current.playVideo(); } catch {}
-
-      // Swap refs
-      const oldPrimary = playerRef.current;
-      playerRef.current = preCuePlayerRef.current;
-      preCuePlayerRef.current = null;
-      preCueReadyRef.current = false;
-      preCueVideoIdRef.current = null;
-
-      // Destroy the old primary player
-      try { oldPrimary.destroy(); } catch {}
-
-      prevVideoIdRef.current = newVideoId;
-      preCueSwappingRef.current = false;
-      diag("GUEST", roomCode, "player", "pre-cue-swap-done", {
-        t: performance.now().toFixed(2),
-        dyMs: +(performance.now() - loadAt).toFixed(2),
-      });
-    } else {
-      // Cold path: fall back to loadVideoById on the primary player
-      diag("GUEST", roomCode, "player", "loadVideoById", {
-        newVideoId,
-        prevVideoId: prevVideoIdRef.current,
-        index: currentSongIndex,
-        t: loadAt.toFixed(2),
-        preCueReady: preCueReadyRef.current,
-        preCueVideoId: preCueVideoIdRef.current,
-      });
-      diag("PLAYER", roomCode, "player", "song-change", {
-        role: "guest",
-        method: "cold",
-        newVideoId,
-        prevVideoId: prevVideoIdRef.current,
-        index: currentSongIndex,
-        t: loadAt.toFixed(2),
-      });
-
-      prevVideoIdRef.current = newVideoId;
-      playerRef.current.loadVideoById(newVideoId);
-    }
-  }, [currentSong?.url, currentSongIndex, playerInstanceReady, roomCode]);
-
-  // Control playback
-  useEffect(() => {
-    if (!playerRef.current || !playerInstanceReady) {
-      diag("PLAYER", roomCode, isPlaying ? "play" : "pause", "ignored-not-ready", {
-        role: "guest",
-        cause: "poll-effect",
-      });
-      return;
-    }
-
-    diag("PLAYER", roomCode, isPlaying ? "play" : "pause", "request", {
-      role: "guest",
-      cause: "poll-effect",
+    const force = Boolean(socketCommand && socketCommand.revision === revision);
+    diag("PLAYER", roomCode, isPlaying ? "play" : "pause", "authoritative-update", {
+      revision,
+      positionSeconds,
+      force,
     });
-    if (isPlaying) {
-      if (lastDiagPlayRef.current !== true) {
-        diag("GUEST", roomCode, "PLAY", "effect-playVideo", { cause: "poll" });
-      }
-      lastDiagPlayRef.current = true;
-      playerRef.current.playVideo?.();
-    } else {
-      if (lastDiagPlayRef.current !== false) {
-        diag("GUEST", roomCode, "PAUSE", "effect-pauseVideo", { cause: "poll" });
-      }
-      lastDiagPlayRef.current = false;
-      playerRef.current.pauseVideo?.();
-    }
-  }, [isPlaying, playerInstanceReady]);
-
-  // Execute host-issued play/pause commands relayed over Socket.IO.
-  // HTTP polling remains the reconciliation mechanism for state.
-  useEffect(() => {
-    if (!socketCommand) return;
-    if (!playerRef.current || !playerInstanceReady) {
-      diag("PLAYER", roomCode, socketCommand.type, "ignored-not-ready", {
-        role: "guest",
-        cause: "socket-command",
-        seq: socketCommand.seq ?? null,
-      });
-      return;
-    }
-
-    diag("PLAYER", roomCode, socketCommand.type, "request", {
-      role: "guest",
-      cause: "socket-command",
-      seq: socketCommand.seq ?? null,
-    });
-    if (socketCommand.type === "play") {
-      diag("GUEST", roomCode, "PLAY", "playVideo()", { seq: socketCommand.seq });
-      playerRef.current.playVideo?.();
-    } else {
-      diag("GUEST", roomCode, "PAUSE", "pauseVideo()", { seq: socketCommand.seq });
-      playerRef.current.pauseVideo?.();
-    }
-  }, [socketCommand, playerInstanceReady]);
-
-  // Sync progress with server
-  useEffect(() => {
-    if (!playerRef.current || !playerInstanceReady) return;
-
-    if (Math.abs(played - serverProgress) > 0.05) {
-      setPlayed(serverProgress);
-      const duration = playerRef.current.getDuration();
-      if (duration > 0) {
-        diag("GUEST", roomCode, "DRIFT", "hard-seek", {
-          from: played,
-          to: serverProgress,
-          delta: +(Math.abs(played - serverProgress) * 100).toFixed(2) + "%",
-        });
-        diag("PLAYER", roomCode, "seek", "apply", {
-          role: "guest",
-          cause: "drift-correction",
-          fraction: serverProgress,
-          positionSec: serverProgress * duration,
-        });
-        playerRef.current.seekTo(serverProgress * duration, true);
-      }
-    }
-  }, [serverProgress, played, playerInstanceReady]);
+    applyAuthoritativePlayback(force);
+  }, [
+    currentSong?.id,
+    currentSongIndex,
+    currentTrackId,
+    isPlaying,
+    positionSeconds,
+    revision,
+    socketCommand,
+    playerInstanceReady,
+    roomCode,
+    applyAuthoritativePlayback,
+  ]);
 
   // Update local progress
   useEffect(() => {
@@ -460,13 +453,19 @@ export function GuestPlayer({ roomCode, queue, currentSongIndex, isPlaying, serv
     <>
       <div ref={containerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
       <div ref={preCueContainerRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '200px', height: '200px' }} />
-      <NowPlayingStage
+      <RoomScreen
         variant="guest"
-        currentSong={currentSong ?? null}
+        code={roomCode}
+        queue={queue}
+        currentSongIndex={currentSongIndex}
         isPlaying={isPlaying}
+        isBuffering={isBuffering}
         played={played}
         duration={duration}
         hostName={hostName}
+        members={members}
+        loading={loading}
+        onLeave={() => onLeave?.()}
       />
     </>
   );

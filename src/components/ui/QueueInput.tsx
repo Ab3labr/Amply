@@ -1,19 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { Plus } from "lucide-react";
+import { useRef, useState } from "react";
+import { Loader2, Plus } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
 
 interface QueueInputProps {
   code: string;
+  variant?: "header" | "queue";
+  className?: string;
 }
 
-export function QueueInput({ code }: QueueInputProps) {
+export function QueueInput({ code, variant = "header", className = "" }: QueueInputProps) {
   const [link, setLink] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleAdd = async () => {
-    if (!link) return;
+    if (!link.trim() || isLoading) return;
     setIsLoading(true);
     try {
       const res = await fetch(`/api/rooms/${code}/queue`, {
@@ -23,8 +26,9 @@ export function QueueInput({ code }: QueueInputProps) {
       });
       if (res.ok) {
         toast("Added to queue");
+        setLink("");
+        inputRef.current?.focus();
       }
-      setLink("");
     } catch (e) {
       console.error(e);
     } finally {
@@ -33,11 +37,16 @@ export function QueueInput({ code }: QueueInputProps) {
   };
 
   return (
-    <div className="flex items-center gap-2.5">
+    <div
+      className={`flex h-12 items-center gap-2 rounded-full border border-border-subtle bg-surface/75 pl-5 pr-1.5 transition-colors duration-200 focus-within:border-border-strong focus-within:bg-surface ${
+        variant === "queue" ? "w-full" : "w-full max-w-[420px]"
+      } ${className}`}
+    >
       <input
+        ref={inputRef}
         type="text"
-        placeholder="Paste a YouTube link to add"
-        aria-label="Add song to queue"
+        placeholder="Paste YouTube link to add"
+        aria-label="Add a YouTube link to the queue"
         value={link}
         onChange={(e) => setLink(e.target.value)}
         onKeyDown={(e) => {
@@ -47,15 +56,20 @@ export function QueueInput({ code }: QueueInputProps) {
           }
         }}
         disabled={isLoading}
-        className="min-w-0 flex-1 rounded-xl border border-border-subtle bg-surface px-3.5 py-[11px] text-sm text-primary placeholder-secondary transition-[border-color,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-accent focus:bg-surface-2 focus:outline-none"
+        className="min-w-0 flex-1 bg-transparent text-[14px] text-primary placeholder:text-secondary focus:outline-none disabled:opacity-60"
       />
       <button
+        type="button"
         onClick={handleAdd}
         disabled={!link.trim() || isLoading}
         aria-label="Add to queue"
-        className="grid h-11 w-11 flex-none place-items-center rounded-xl border border-border-subtle bg-transparent text-primary transition-[border-color,background-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-border-strong hover:bg-surface-2 active:translate-y-px active:scale-[0.97] disabled:cursor-default disabled:opacity-50 disabled:hover:border-border-subtle disabled:hover:bg-transparent"
+        className="grid h-9 w-9 flex-none place-items-center rounded-full bg-primary text-background transition-[opacity,transform] duration-200 hover:opacity-85 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
       >
-        <Plus size={20} strokeWidth={2} />
+        {isLoading ? (
+          <Loader2 size={16} strokeWidth={2} className="animate-spin" />
+        ) : (
+          <Plus size={18} strokeWidth={2.2} />
+        )}
       </button>
     </div>
   );

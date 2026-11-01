@@ -1,22 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --font-inter: 'Inter', sans-serif;
-  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 
-  /* Light theme - warm ivory background with black text */
-  --color-background: oklch(97% 0.008 85);
-  --color-background-2: oklch(95% 0.006 85);
-  --color-surface: oklch(98% 0.004 85);
-  --color-surface-2: oklch(96% 0.006 85);
-  --color-primary: oklch(12% 0.008 85);
-  --color-secondary: oklch(45% 0.008 85);
-  --color-accent: oklch(72% 0.12 25);
-  --color-accent-hi: oklch(75% 0.10 25);
-  --color-accent-dim: oklch(72% 0.12 25 / 0.14);
-  --color-success: oklch(65% 0.15 145);
-  --color-border-subtle: oklch(12% 0.008 85 / 0.08);
-  --color-border-strong: oklch(12% 0.008 85 / 0.12);
+  /* Approved cream-and-ink editorial palette */
+  --color-background: #f7f3e7;
+  --color-background-2: #efe8d8;
+  --color-surface: #fbf8f0;
+  --color-surface-2: #e9e2d3;
+  --color-primary: #080808;
+  --color-secondary: #666055;
+  --color-accent: #d94135;
+  --color-accent-hi: #c6372e;
+  --color-accent-dim: rgba(217, 65, 53, 0.14);
+  --color-coral-text: #b9342b;
+  --color-blue-violet: #465fb0;
+  --color-olive: #a1a18a;
+  --color-success: #4f8a5b;
+  --color-border-subtle: rgba(8, 8, 8, 0.1);
+  --color-border-strong: rgba(8, 8, 8, 0.18);
 }
 
 @layer base {
@@ -36,87 +39,133 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
+@layer base {
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
 }
 
 button:focus-visible,
 input:focus-visible,
+a:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent-hi);
+  outline: 2px solid var(--color-accent);
   outline-offset: 3px;
-  border-radius: 8px;
 }
 
 /* ============ Keyframes ============ */
-@keyframes amply-spin {
-  to { transform: rotate(360deg); }
-}
 @keyframes amply-eq {
   0%, 100% { height: 25%; }
   50% { height: 100%; }
 }
+@keyframes amply-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* ============ Animation / effect primitives ============ */
 @layer components {
-  /* Light listening-room shell: warm radial wash behind the stage */
-  .app-shell {
+  .room-shell {
     background:
-      radial-gradient(120% 90% at 50% -10%, oklch(95% 0.008 85 / 0.6), transparent 55%),
-      var(--color-background);
+      radial-gradient(120% 95% at 12% 16%, #fbf8f0 0%, transparent 56%),
+      linear-gradient(180deg, #f7f3e7 0%, #efe8d8 58%, #ded5c3 100%);
   }
 
-  /* ---- Vinyl disc ---- */
-  .vinyl {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background:
-      repeating-radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.06) 0 1px, transparent 1px 9px),
-      radial-gradient(circle at 50% 50%, oklch(35% 0.008 70) 0 38%, oklch(25% 0.006 70) 70%, oklch(18% 0.005 70) 100%);
-    box-shadow:
-      inset 0 0 0 1px rgba(0, 0, 0, 0.08),
-      0 26px 60px -18px rgba(0, 0, 0, 0.25),
-      0 0 0 1px oklch(72% 0.12 25 / 0.15),
-      0 0 36px 5px oklch(72% 0.12 25 / 0.08);
-    will-change: transform;
-    animation: amply-spin 9s linear infinite;
+  .vinyl-wash {
+    background: radial-gradient(55% 55% at 22% 58%, rgba(217, 65, 53, 0.07), transparent 72%);
   }
-  .vinyl::after {
-    content: "";
+
+  .vinyl-stage {
+    --vinyl-size: min(92vw, 430px);
+    position: relative;
+    width: var(--vinyl-size);
+    aspect-ratio: 1 / 1;
+    margin-left: calc(var(--vinyl-size) * -0.36);
+  }
+
+  @media (min-width: 640px) {
+    .vinyl-stage {
+      --vinyl-size: min(62vw, 520px);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .vinyl-stage {
+      --vinyl-size: min(90vh, 50vw);
+      position: absolute;
+      left: calc(var(--vinyl-size) * -0.29);
+      top: 50%;
+      margin-left: 0;
+      transform: translateY(-50%);
+    }
+  }
+
+  /* ---- Black vinyl record ---- */
+  .vinyl-disc {
+    position: absolute;
+    inset: 3%;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, #242424 0 29%, #141414 29.5% 49%, #0b0b0b 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+      0 38px 90px -38px rgba(0, 0, 0, 0.55);
+    will-change: transform;
+  }
+  .vinyl-grooves {
+    position: absolute;
+    inset: 5%;
+    border-radius: 50%;
+    background:
+      repeating-radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.1) 0 0.6px, transparent 0.6px 5.5px),
+      repeating-radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.045) 0 0.5px, transparent 0.5px 13px);
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+  .vinyl-sheen {
     position: absolute;
     inset: 0;
     border-radius: 50%;
     background:
-      radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.12), transparent 34%),
-      conic-gradient(from 210deg, transparent 0deg, rgba(0, 0, 0, 0.02) 30deg, transparent 80deg);
+      radial-gradient(circle at 31% 25%, rgba(255, 255, 255, 0.1), transparent 33%),
+      conic-gradient(from 214deg, transparent 0deg, rgba(255, 255, 255, 0.05) 32deg, transparent 92deg);
+    pointer-events: none;
   }
   .vinyl-label {
     position: absolute;
     left: 50%;
     top: 50%;
-    width: 17%;
+    width: 27%;
     aspect-ratio: 1;
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: oklch(85% 0.008 85);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: radial-gradient(circle at 38% 32%, #f3efe3 0%, #ded8c8 48%, #a1a18a 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(8, 8, 8, 0.12),
+      inset 0 1px 8px rgba(255, 255, 255, 0.35);
     display: grid;
     place-items: center;
   }
   .vinyl-label::after {
     content: "";
-    width: 12%;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 7%;
     aspect-ratio: 1;
+    transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: oklch(18% 0.005 70);
-  }
-  [data-paused="true"] .vinyl {
-    animation-play-state: paused;
+    background: #f7f3e7;
+    box-shadow: inset 0 0 0 1px rgba(8, 8, 8, 0.28);
   }
 
   /* ---- Equalizer bars ---- */
@@ -124,7 +173,7 @@ input:focus-visible,
     display: flex;
     align-items: flex-end;
     gap: 2.5px;
-    height: 15px;
+    height: 14px;
   }
   .eq i {
     width: 3px;
@@ -145,74 +194,41 @@ input:focus-visible,
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: 0.28;
+    opacity: 0.2;
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='0.5'/></svg>");
   }
 
-  /* ---- Stage glows ---- */
-  .stage-glow {
-    position: absolute;
-    left: 50%;
-    top: 46%;
-    width: 820px;
-    height: 820px;
-    transform: translate(-50%, -50%);
-    background: radial-gradient(circle, oklch(90% 0.04 70 / 0.2), transparent 62%);
-    border-radius: 50%;
-    pointer-events: none;
-  }
-  .bottom-glow {
-    position: absolute;
-    left: -12%;
-    right: -12%;
-    bottom: -16%;
-    height: 52%;
-    pointer-events: none;
-    filter: blur(70px);
-    opacity: 0.8;
-    background:
-      radial-gradient(42% 62% at 20% 92%, oklch(72% 0.12 25 / 0.35), transparent 70%),
-      radial-gradient(38% 58% at 58% 100%, oklch(65% 0.14 320 / 0.3), transparent 70%),
-      radial-gradient(40% 60% at 86% 84%, oklch(60% 0.10 280 / 0.25), transparent 70%),
-      radial-gradient(35% 55% at 40% 100%, oklch(55% 0.08 200 / 0.2), transparent 65%);
+  .track-swap {
+    animation: amply-fade-in 0.32s ease both;
   }
 
-  /* ---- Eyebrow label divider lines ---- */
-  .eyebrow::before,
-  .eyebrow::after {
-    content: "";
-    width: 26px;
-    height: 1px;
-    background: var(--color-border-strong);
+  .artwork-placeholder {
+    background: linear-gradient(140deg, #f7f3e7 0%, #ddd6c4 55%, #a1a18a 100%);
   }
 
-  /* ---- Queue rail scrollbar ---- */
-  .qp-list {
+  /* ---- Editorial queue scrollbar ---- */
+  .queue-scroll {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-border-strong) transparent;
+    scrollbar-color: rgba(8, 8, 8, 0.2) transparent;
   }
-  .qp-list::-webkit-scrollbar { width: 8px; }
-  .qp-list::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 999px; }
-  .qp-list::-webkit-scrollbar-track { background: transparent; }
+  .queue-scroll::-webkit-scrollbar { width: 7px; }
+  .queue-scroll::-webkit-scrollbar-thumb {
+    background: rgba(8, 8, 8, 0.18);
+    border-radius: 999px;
+  }
+  .queue-scroll::-webkit-scrollbar-track { background: transparent; }
 }
 
-/* ---- Tilt scene sizing (height/width media dependent) ---- */
-.tilt-scene {
-  position: relative;
-  width: min(44vh, 430px);
-  aspect-ratio: 1;
-  flex: none;
-  perspective: 1400px;
-  margin-bottom: 26px;
-}
-@media (max-height: 780px) {
-  .tilt-scene { width: min(38vh, 430px); margin-bottom: 18px; }
-}
-@media (max-width: 640px) {
-  .tilt-scene {
-    width: min(72vw, 320px);
-    margin-bottom: 18px;
+@media (prefers-reduced-motion: reduce) {
+  .track-swap {
+    animation: none;
   }
-  .bottom-glow { filter: blur(48px); }
+  .eq i {
+    animation: none;
+    height: 55%;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
 }

@@ -46,7 +46,11 @@ export async function POST(
     // Auto-play if it's the first song
     if (room.queue.length === 1) {
       room.currentSongIndex = 0;
+      room.currentTrackId = newItem.id;
       room.isPlaying = true;
+      room.progress = 0;
+      room.positionSeconds = 0;
+      room.revision += 1;
     }
 
     room.lastActivity = Date.now();

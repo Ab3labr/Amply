@@ -15,6 +15,9 @@ export async function GET(
     return NextResponse.json({ error: "Room does not exist" }, { status: 404 });
   }
 
+  room.positionSeconds ??= 0;
+  room.currentTrackId ??= room.queue[room.currentSongIndex]?.id ?? null;
+
   // Update lastActivity on room access
   room.lastActivity = Date.now();
   roomsStore.set(code, room);

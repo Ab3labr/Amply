@@ -1,8 +1,5 @@
 "use client";
 
-import { Topbar } from "@/components/ui/Topbar";
-import { QueuePanel } from "@/components/ui/QueuePanel";
-import { Toast } from "@/components/ui/Toast";
 import { GuestPlayer, type SocketCommand } from "@/components/ui/GuestPlayer";
 import { RoomData } from "@/lib/store";
 import { diag } from "@/lib/sync-diag";
@@ -10,6 +7,17 @@ import { startClockSync, stopClockSync } from "@/lib/clock-sync";
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
+
+type PlaybackSocketPayload = {
+  type?: SocketCommand["type"];
+  revision?: number;
+  songIndex?: number;
+  trackId?: string | null;
+  positionSeconds?: number;
+  progress?: number;
+  isPlaying?: boolean;
+  seq?: number | null;
+};
 
 export default function GuestRoomPage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params);
@@ -19,6 +27,9 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
   const [socketCommand, setSocketCommand] = useState<SocketCommand | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const prevIndexRef = useRef<number | null>(null);
+  const roomStateRef = useRef<RoomData | null>(null);
+  const latestRevisionRef = useRef(-1);
+  const pendingCommandRef = useRef<SocketCommand | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -39,27 +50,44 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
       console.log("[GUEST SOCKET] ROOM_SYNC received", payload);
     });
 
-    socket.on("PLAY", (payload: any) => {
-      console.log("[GUEST SOCKET] PLAY received", payload);
-      diag("GUEST", code, "PLAY", "receive", { seq: payload?.seq, clientTs: payload?.timestamp });
-      setSocketCommand({ type: "play", at: Date.now(), seq: payload?.seq });
-    });
-
-    socket.on("PAUSE", (payload: any) => {
-      console.log("[GUEST SOCKET] PAUSE received", payload);
-      diag("GUEST", code, "PAUSE", "receive", { seq: payload?.seq, clientTs: payload?.timestamp });
-      setSocketCommand({ type: "pause", at: Date.now(), seq: payload?.seq });
-    });
-
-    socket.on("SEEK", (payload: any) => {
-      console.log("[GUEST SOCKET] SEEK received", payload);
-      diag("GUEST", code, "SEEK", "receive", {
-        seq: payload?.seq,
-        position: payload?.position,
-        clientTs: payload?.timestamp,
-        action: "ignored-by-design",
+    const acceptPlaybackCommand = (payload: PlaybackSocketPayload) => {
+      if (typeof payload.revision !== "number" || payload.revision <= latestRevisionRef.current) return;
+      if (typeof payload.songIndex !== "number") return;
+      const command: SocketCommand = {
+        type: payload.type ?? "update",
+        revision: payload.revision,
+        songIndex: payload.songIndex,
+        trackId: payload.trackId ?? null,
+        positionSeconds: payload.positionSeconds ?? 0,
+        progress: payload.progress ?? 0,
+        isPlaying: Boolean(payload.isPlaying),
+        seq: payload.seq,
+      };
+      latestRevisionRef.current = command.revision;
+      pendingCommandRef.current = command;
+      setSocketCommand(command);
+      const current = roomStateRef.current;
+      if (current) {
+        const next = {
+          ...current,
+          currentSongIndex: command.songIndex,
+          currentTrackId: command.trackId,
+          positionSeconds: command.positionSeconds,
+          progress: command.progress,
+          isPlaying: command.isPlaying,
+          revision: command.revision,
+        };
+        roomStateRef.current = next;
+        setRoomState(next);
+      }
+      diag("GUEST", code, command.type.toUpperCase(), "receive", {
+        seq: command.seq,
+        revision: command.revision,
       });
-    });
+    };
+
+    socket.on("PLAYBACK_UPDATE", acceptPlaybackCommand);
+    socket.on("PLAYBACK_COMMAND", acceptPlaybackCommand);
 
     return () => {
       socket.disconnect();
@@ -79,16 +107,33 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
           rttMs: +(receivedAt - startedAt).toFixed(2),
         });
         if (res.ok) {
-          const data = await res.json();
-          if (prevIndexRef.current !== null && data.currentSongIndex !== prevIndexRef.current) {
+          const data: RoomData = await res.json();
+          data.positionSeconds ??= 0;
+          data.currentTrackId ??= data.queue[data.currentSongIndex]?.id ?? null;
+          if (roomStateRef.current && data.revision < latestRevisionRef.current) return;
+          const pending = pendingCommandRef.current;
+          const next = pending && pending.revision > data.revision
+            ? {
+                ...data,
+                currentSongIndex: pending.songIndex,
+                currentTrackId: pending.trackId,
+                positionSeconds: pending.positionSeconds,
+                progress: pending.progress,
+                isPlaying: pending.isPlaying,
+                revision: pending.revision,
+              }
+            : data;
+          if (prevIndexRef.current !== null && next.currentSongIndex !== prevIndexRef.current) {
             diag("GUEST", code, "SONG_CHANGE", "poll-detected", {
               from: prevIndexRef.current,
-              to: data.currentSongIndex,
-              isPlaying: data.isPlaying,
+              to: next.currentSongIndex,
+              isPlaying: next.isPlaying,
             });
           }
-          prevIndexRef.current = data.currentSongIndex;
-          setRoomState(data);
+          prevIndexRef.current = next.currentSongIndex;
+          latestRevisionRef.current = next.revision;
+          roomStateRef.current = next;
+          setRoomState(next);
         } else {
           router.push("/");
         }
@@ -104,44 +149,19 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
   }, [code, router]);
 
   return (
-    <div className="app-shell flex min-h-dvh flex-col bg-background lg:h-dvh lg:overflow-hidden relative">
-      {/* Film grain overlay */}
-      <div className="grain" />
-      {/* Rich landscape gradient background */}
-      <div className="absolute inset-0 pointer-events-none" style={{
-        background: `
-          linear-gradient(to bottom, oklch(97% 0.008 85) 0%, oklch(95% 0.006 85) 50%, transparent 80%),
-          radial-gradient(ellipse 120% 80% at 50% 120%, oklch(72% 0.12 25 / 0.5), transparent 50%),
-          radial-gradient(ellipse 100% 60% at 20% 120%, oklch(65% 0.18 28 / 0.4), transparent 45%),
-          radial-gradient(ellipse 90% 50% at 80% 120%, oklch(60% 0.10 320 / 0.35), transparent 40%),
-          radial-gradient(ellipse 80% 40% at 40% 120%, oklch(70% 0.14 280 / 0.3), transparent 35%),
-          radial-gradient(ellipse 70% 30% at 60% 120%, oklch(55% 0.08 200 / 0.25), transparent 30%),
-          oklch(97% 0.008 85)
-        `
-      }} />
-      <Toast />
-      <Topbar code={code} members={roomState?.members || []} onLeave={() => router.push("/")} />
-
-      <main className="grid w-full min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_384px]">
-        <div className="relative flex min-h-0 flex-col overflow-hidden">
-          <GuestPlayer
-            roomCode={code}
-            queue={roomState?.queue || []}
-            currentSongIndex={roomState?.currentSongIndex || 0}
-            isPlaying={roomState?.isPlaying || false}
-            serverProgress={roomState?.progress ?? 0}
-            socketCommand={socketCommand}
-            hostName={roomState?.hostName}
-          />
-        </div>
-
-        <QueuePanel
-          code={code}
-          queue={roomState?.queue || []}
-          currentSongIndex={roomState?.currentSongIndex || 0}
-          isPlaying={roomState?.isPlaying || false}
-        />
-      </main>
-    </div>
+    <GuestPlayer
+      roomCode={code}
+      queue={roomState?.queue || []}
+      currentSongIndex={roomState?.currentSongIndex ?? 0}
+      isPlaying={roomState?.isPlaying ?? false}
+      positionSeconds={roomState?.positionSeconds ?? 0}
+      revision={roomState?.revision ?? -1}
+      currentTrackId={roomState?.currentTrackId ?? null}
+      socketCommand={socketCommand}
+      hostName={roomState?.hostName}
+      members={roomState?.members || []}
+      loading={!roomState}
+      onLeave={() => router.push("/")}
+    />
   );
 }

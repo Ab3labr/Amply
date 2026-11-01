@@ -70,6 +70,20 @@ a:focus-visible,
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes amply-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+@keyframes amply-wave-drift {
+  from { transform: translate3d(0, 0, 0) scale(1.02); }
+  to { transform: translate3d(0, -1.2%, 0) scale(1.055); }
+}
 
 /* ============ Animation / effect primitives ============ */
 @layer components {
@@ -218,10 +232,41 @@ a:focus-visible,
     border-radius: 999px;
   }
   .queue-scroll::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---- Landing page ---- */
+  .landing-rise {
+    animation: amply-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .landing-wave-mask {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 15%, #000 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 15%, #000 100%);
+  }
+
+  .landing-wave {
+    background-image: url("/amply-wave-mobile.webp");
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: 38% bottom;
+    transform-origin: 50% 100%;
+    animation: amply-wave-drift 46s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+
+  @media (min-width: 768px) {
+    .landing-wave {
+      background-image: url("/amply-wave.webp");
+      background-position: 50% bottom;
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .track-swap {
+    animation: none;
+  }
+  .landing-rise,
+  .landing-wave {
     animation: none;
   }
   .eq i {

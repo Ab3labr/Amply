@@ -1,67 +1,64 @@
-"use client";
-
-import { Button } from "@/components/ui/Button";
-import { Navbar } from "@/components/ui/Navbar";
-import { PageContainer } from "@/components/ui/PageContainer";
-import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { BrandMark } from "@/components/ui/BrandMark";
 
 export default function Home() {
-  const router = useRouter();
-
   return (
-    <PageContainer>
-      {/* Film grain overlay */}
-      <div className="grain" />
-      {/* Rich landscape gradient background */}
-      <div className="absolute inset-0 pointer-events-none" style={{
-        background: `
-          linear-gradient(to bottom, oklch(97% 0.008 85) 0%, oklch(95% 0.006 85) 40%, transparent 70%),
-          radial-gradient(ellipse 120% 80% at 50% 100%, oklch(72% 0.12 25 / 0.6), transparent 50%),
-          radial-gradient(ellipse 100% 60% at 20% 100%, oklch(65% 0.18 28 / 0.5), transparent 45%),
-          radial-gradient(ellipse 90% 50% at 80% 100%, oklch(60% 0.10 320 / 0.4), transparent 40%),
-          radial-gradient(ellipse 80% 40% at 40% 100%, oklch(70% 0.14 280 / 0.35), transparent 35%),
-          radial-gradient(ellipse 70% 30% at 60% 100%, oklch(55% 0.08 200 / 0.3), transparent 30%),
-          radial-gradient(ellipse 60% 25% at 30% 100%, oklch(62% 0.11 15 / 0.25), transparent 25%),
-          oklch(97% 0.008 85)
-        `
-      }} />
+    <div className="relative flex min-h-[100svh] flex-col overflow-x-hidden bg-background">
+      {/* Film grain across the cream ground and the wave */}
+      <div className="grain z-10" aria-hidden="true" />
 
-      <Navbar />
-
-      <main className="flex-1 flex flex-col items-center justify-center text-center w-full z-10 pb-20">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          className="max-w-[800px] w-full"
+      <header className="landing-rise relative z-20 px-6 pt-6 sm:px-10 sm:pt-8">
+        <Link
+          href="/"
+          aria-label="Amply home"
+          className="inline-flex items-center gap-2.5 rounded-sm text-primary sm:gap-3"
         >
-          <h1 className="text-[56px] md:text-[80px] font-bold leading-[1.1] mb-8 tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-primary to-primary/70">
-            One room.<br />
-            Every device.<br />
-            Perfectly together.
+          <BrandMark className="h-[clamp(26px,3.6vw,54px)] w-auto" />
+          <span className="text-[clamp(27px,3.3vw,50px)] font-extrabold leading-none tracking-[-0.045em]">
+            Amply
+          </span>
+        </Link>
+      </header>
+
+      <main className="relative z-20 flex flex-col items-center px-6 text-center">
+        <div className="landing-rise flex flex-col items-center pt-[clamp(34px,10vh,148px)] [animation-delay:90ms]">
+          <h1 className="text-[clamp(27px,5.9vw,82px)] font-extrabold leading-[1.04] tracking-[-0.04em] text-primary">
+            <span className="block">One room. Every device.</span>
+            <span className="block">Perfectly together.</span>
           </h1>
-          
-          <p className="text-[20px] text-secondary mb-12 max-w-xl mx-auto leading-relaxed">
+
+          <p className="mt-5 max-w-[46rem] text-[clamp(15px,1.35vw,21px)] leading-relaxed text-primary/75 sm:mt-6">
             Create a listening room in seconds and play music across every connected device.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Button className="w-full sm:w-auto min-w-[220px]" onClick={() => router.push("/host-setup")}>
+          <div className="mt-8 flex w-full max-w-[420px] flex-col items-center gap-3 sm:mt-10 sm:w-auto sm:max-w-none sm:flex-row sm:gap-5">
+            <Link
+              href="/host-setup"
+              className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-primary px-9 text-[17px] font-semibold text-background transition-colors duration-300 hover:bg-[#1d1d1d] active:translate-y-px sm:h-[56px] sm:w-auto sm:min-w-[200px] sm:text-[18px]"
+            >
               Host a Room
-            </Button>
-            <Button variant="secondary" className="w-full sm:w-auto min-w-[220px]" onClick={() => router.push("/join")}>
+            </Link>
+            <Link
+              href="/join"
+              className="inline-flex h-[54px] w-full items-center justify-center rounded-full border-[1.5px] border-primary/80 px-9 text-[17px] font-semibold text-primary transition-colors duration-300 hover:bg-primary/[0.04] active:translate-y-px sm:h-[56px] sm:w-auto sm:min-w-[200px] sm:text-[18px]"
+            >
               Join with Code
-            </Button>
+            </Link>
           </div>
-        </motion.div>
+        </div>
       </main>
 
-      <footer className="w-full text-center pb-8 z-10">
-        <span className="text-[13px] text-secondary font-medium tracking-wide opacity-60">
-          Designed for shared listening.
-        </span>
-      </footer>
-    </PageContainer>
+      {/* Painterly wave: the landing page's signature brand moment */}
+      <div
+        className="landing-wave-mask relative z-0 mt-auto h-[clamp(230px,40vh,500px)] w-full"
+        aria-hidden="true"
+      >
+        <div className="landing-wave absolute inset-0" />
+      </div>
+
+      <p className="pointer-events-none absolute inset-x-0 bottom-[clamp(18px,4.6vh,52px)] z-30 px-6 text-center text-[clamp(14px,1.3vw,19px)] font-semibold tracking-[0.005em] text-white [text-shadow:0_1px_20px_rgba(64,18,0,0.5)]">
+        Designed for shared listening.
+      </p>
+    </div>
   );
 }

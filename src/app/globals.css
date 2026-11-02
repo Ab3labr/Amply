@@ -85,9 +85,27 @@ a:focus-visible,
     transform: translate3d(0, 0, 0);
   }
 }
+/* The wave moves as one piece, then returns to its exact starting frame. The
+   middle beats keep the contour alive without reading as a repeating sway. */
 @keyframes amply-wave-drift {
-  from { transform: translate3d(0, 0, 0) scale(1.02); }
-  to { transform: translate3d(0, -1.2%, 0) scale(1.055); }
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.025); }
+  25% { transform: translate3d(-0.45%, -0.7%, 0) scale(1.04); }
+  50% { transform: translate3d(0.15%, -1.15%, 0) scale(1.055); }
+  75% { transform: translate3d(0.55%, -0.45%, 0) scale(1.04); }
+}
+
+@keyframes amply-wave-current-a {
+  0%, 100% { transform: translate3d(-0.4%, 0.4%, 0) scale(1.045) rotate(-0.15deg); }
+  25% { transform: translate3d(0.4%, -0.5%, 0) scale(1.06) rotate(0.1deg); }
+  50% { transform: translate3d(0.8%, -0.9%, 0) scale(1.04) rotate(0.18deg); }
+  75% { transform: translate3d(-0.15%, -0.2%, 0) scale(1.055) rotate(-0.04deg); }
+}
+
+@keyframes amply-wave-current-b {
+  0%, 100% { transform: translate3d(0.65%, -0.25%, 0) scale(1.06) rotate(0.12deg); }
+  25% { transform: translate3d(-0.35%, -0.85%, 0) scale(1.045) rotate(-0.08deg); }
+  50% { transform: translate3d(-0.75%, -0.2%, 0) scale(1.065) rotate(-0.16deg); }
+  75% { transform: translate3d(0.1%, 0.45%, 0) scale(1.05) rotate(0.03deg); }
 }
 
 /* ============ Animation / effect primitives ============ */
@@ -249,13 +267,45 @@ a:focus-visible,
   }
 
   .landing-wave {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     background-image: url("/amply-wave-mobile.webp");
     background-repeat: no-repeat;
     background-size: cover;
     background-position: 38% bottom;
     transform-origin: 50% 100%;
-    animation: amply-wave-drift 46s ease-in-out infinite alternate;
+    animation: amply-wave-drift 31s linear infinite;
     will-change: transform;
+  }
+
+  /* Reusing the original artwork as translucent pigment layers keeps the
+     painterly grain and palette intact. Each layer travels on its own quiet
+     24/36-second current, creating depth rather than independent blobs. */
+  .landing-wave::before,
+  .landing-wave::after {
+    content: "";
+    position: absolute;
+    inset: -5%;
+    z-index: 0;
+    background-image: inherit;
+    background-repeat: inherit;
+    background-size: 103% 103%;
+    background-position: inherit;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .landing-wave::before {
+    opacity: 0.14;
+    mix-blend-mode: multiply;
+    animation: amply-wave-current-a 24s linear infinite;
+  }
+
+  .landing-wave::after {
+    opacity: 0.1;
+    mix-blend-mode: screen;
+    animation: amply-wave-current-b 37s linear infinite reverse;
   }
 
   @media (min-width: 768px) {
@@ -271,7 +321,9 @@ a:focus-visible,
     animation: none;
   }
   .landing-rise,
-  .landing-wave {
+  .landing-wave,
+  .landing-wave::before,
+  .landing-wave::after {
     animation: none;
   }
   .eq i {

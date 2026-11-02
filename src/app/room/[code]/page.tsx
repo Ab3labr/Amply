@@ -167,7 +167,7 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
       hostName={roomState?.hostName}
       members={roomState?.members || []}
       loading={!roomState}
-      onLeave={() => router.push("/")}
+        onLeave={() => router.replace("/join")}
     />
   );
 }

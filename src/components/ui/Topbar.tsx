@@ -28,6 +28,7 @@ export function Topbar({
       <div className="flex min-w-0 items-center gap-3 sm:gap-5">
         <Link
           href="/"
+          replace
           aria-label="Amply home"
           className="flex flex-none items-center gap-2 text-[21px] font-medium tracking-[-0.02em] text-primary transition-opacity hover:opacity-75 sm:text-[23px]"
         >
@@ -53,8 +54,8 @@ export function Topbar({
         <button
           type="button"
           onClick={onLeave}
-          aria-label="Leave room"
-          title="Leave room"
+          aria-label="Log out"
+          title="Log out"
           className="grid h-9 w-9 place-items-center rounded-full text-secondary transition-colors duration-200 hover:bg-primary/5 hover:text-primary active:translate-y-px"
         >
           <LogOut size={16} strokeWidth={1.8} />

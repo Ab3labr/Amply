@@ -217,7 +217,12 @@ export function GuestPlayer({
       prevVideoId: prevVideoIdRef.current,
       index: currentSongIndex,
     });
-    new window.YT.Player(containerRef.current, {
+    // YouTube replaces the element passed to YT.Player with an iframe.
+    // Mount it inside an unmanaged child so React can safely unmount the
+    // room when the user navigates away.
+    const playerMount = document.createElement('div');
+    containerRef.current.replaceChildren(playerMount);
+    new window.YT.Player(playerMount, {
       height: '200',
       width: '200',
       videoId: '',
@@ -312,6 +317,7 @@ export function GuestPlayer({
         videoId: prevVideoIdRef.current ?? null,
       });
       playerRef.current = null;
+      containerRef.current?.replaceChildren();
       setPlayerInstanceReady(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -326,7 +332,9 @@ export function GuestPlayer({
     const generation = preCueGenerationRef.current + 1;
     preCueGenerationRef.current = generation;
 
-    new window.YT.Player(preCueContainerRef.current, {
+    const preCueMount = document.createElement('div');
+    preCueContainerRef.current.replaceChildren(preCueMount);
+    new window.YT.Player(preCueMount, {
       height: '200',
       width: '200',
       videoId: '',
@@ -367,6 +375,7 @@ export function GuestPlayer({
       preCueGenerationRef.current += 1;
       try { preCuePlayerRef.current?.destroy(); } catch {}
       preCuePlayerRef.current = null;
+      preCueContainerRef.current?.replaceChildren();
       preCueReadyRef.current = false;
       preCueVideoIdRef.current = null;
     };

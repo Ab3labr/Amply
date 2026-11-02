@@ -223,7 +223,7 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
         members={roomState?.members || []}
         hostName={roomState?.hostName}
         loading={!roomState}
-        onLeave={() => router.push("/")}
+        onLeave={() => router.replace("/host-setup")}
         onPlay={emitPlay}
         onPause={emitPause}
         onSeek={emitSeek}

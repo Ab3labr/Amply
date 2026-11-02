@@ -145,7 +145,13 @@ export default function GuestRoomPage({ params }: { params: Promise<{ code: stri
     fetchRoom();
     interval = setInterval(fetchRoom, 2000);
 
-    return () => clearInterval(interval);
+    const socket = socketRef.current;
+    socket?.on("QUEUE_UPDATE", fetchRoom);
+
+    return () => {
+      clearInterval(interval);
+      socket?.off("QUEUE_UPDATE", fetchRoom);
+    };
   }, [code, router]);
 
   return (

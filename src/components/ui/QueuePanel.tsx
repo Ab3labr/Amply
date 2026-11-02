@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { QueueItem } from "@/lib/store";
-import { QueueInput } from "@/components/ui/QueueInput";
+import { MusicSearch } from "@/components/ui/MusicSearch";
 import { QueueRow } from "@/components/ui/QueueRow";
 
 interface QueuePanelProps {
@@ -14,6 +14,8 @@ interface QueuePanelProps {
   loading?: boolean;
   expanded: boolean;
   onToggle: () => void;
+  canPlayNow?: boolean;
+  queuedVideoIds?: string[];
   className?: string;
 }
 
@@ -25,6 +27,8 @@ export function QueuePanel({
   loading = false,
   expanded,
   onToggle,
+  canPlayNow = false,
+  queuedVideoIds = [],
   className = "",
 }: QueuePanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -81,7 +85,12 @@ export function QueuePanel({
       </div>
 
       <div className="mt-4 flex-none lg:hidden">
-        <QueueInput code={code} variant="queue" />
+        <MusicSearch
+          code={code}
+          variant="queue"
+          canPlayNow={canPlayNow}
+          queuedVideoIds={queuedVideoIds}
+        />
       </div>
 
       {loading ? (
@@ -90,7 +99,7 @@ export function QueuePanel({
         </p>
       ) : queue.length === 0 ? (
         <p className="max-w-[34ch] py-8 text-[13px] leading-relaxed text-secondary lg:py-10">
-          No songs yet — add a YouTube link above.
+          No songs yet — search above or paste a YouTube link.
         </p>
       ) : (
         <div

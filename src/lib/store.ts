@@ -2,9 +2,18 @@ import { Participant } from "@/components/ui/ParticipantItem";
 
 export interface QueueItem {
   id: string;
+  /** Canonical `https://www.youtube.com/watch?v=...` URL. */
   url: string;
   title: string;
   thumbnailUrl: string;
+  /** Canonical YouTube video ID; preferred over parsing `url` when present. */
+  videoId?: string;
+  /** YouTube channel/artist name when known. */
+  channelTitle?: string;
+  durationSeconds?: number;
+  durationLabel?: string;
+  addedBy?: string;
+  addedAt?: number;
 }
 
 export interface RoomData {

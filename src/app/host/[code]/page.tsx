@@ -201,9 +201,13 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
     fetchRoom();
     interval = setInterval(fetchRoom, 2000);
 
+    const socket = socketRef.current;
+    socket?.on("QUEUE_UPDATE", fetchRoom);
+
     return () => {
       console.log('[HOST PAGE] Room polling useEffect cleanup');
       clearInterval(interval);
+      socket?.off("QUEUE_UPDATE", fetchRoom);
     };
   }, [code, router]);
 

@@ -274,3 +274,19 @@ export function parseTrackMetadata(rawTitle: string | null | undefined): TrackMe
     rawTitle: raw,
   };
 }
+
+/**
+ * Remove a leading channel name from a video title, e.g.
+ * `"The Weeknd - Blinding Lights (Official Video)"` + `"The Weeknd"` becomes
+ * `"Blinding Lights (Official Video)"`. Used when YouTube search metadata gives
+ * us an authoritative channel and the title repeats it.
+ */
+export function stripChannelPrefix(title: string, channelTitle?: string | null): string {
+  const channel = (channelTitle ?? "").trim();
+  if (!channel) return title;
+
+  const escaped = channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = new RegExp(`^\\s*${escaped}\\s*[-–—:·|]\\s*`, "i");
+  const stripped = title.replace(prefix, "").trim();
+  return stripped || title;
+}

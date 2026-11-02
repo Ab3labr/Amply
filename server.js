@@ -43,6 +43,10 @@ app.prepare().then(() => {
     path: '/socket.io',
   });
 
+  // Expose the Socket.IO server so Next.js route handlers can broadcast
+  // queue changes (QUEUE_UPDATE / PLAYBACK_COMMAND) to room participants.
+  global.io = io;
+
   io.on('connection', (socket) => {
     log(`Client connected: ${socket.id}`);
 

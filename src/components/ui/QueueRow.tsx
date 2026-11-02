@@ -1,6 +1,6 @@
 import { Music2 } from "lucide-react";
 import { QueueItem } from "@/lib/store";
-import { parseTrackMetadata } from "@/lib/track-metadata";
+import { parseTrackMetadata, stripChannelPrefix } from "@/lib/track-metadata";
 import { TrackThumbnail } from "@/components/ui/TrackThumbnail";
 import { Equalizer } from "@/components/ui/Equalizer";
 
@@ -13,9 +13,10 @@ interface QueueRowProps {
 }
 
 export function QueueRow({ song, index, isCurrent, isPlaying, rowRef }: QueueRowProps) {
-  const metadata = parseTrackMetadata(song.title);
-  const title = metadata.title || song.title;
-  const artist = metadata.artist ?? "Unknown artist";
+  const displayTitle = stripChannelPrefix(song.title, song.channelTitle);
+  const metadata = parseTrackMetadata(displayTitle);
+  const title = metadata.title || displayTitle;
+  const artist = song.channelTitle || metadata.artist || "Unknown artist";
 
   return (
     <div
@@ -74,6 +75,12 @@ export function QueueRow({ song, index, isCurrent, isPlaying, rowRef }: QueueRow
           </span>
         </div>
       </div>
+
+      {song.durationLabel ? (
+        <span className="flex-none font-mono text-[10px] tracking-[0.04em] text-secondary tabular-nums">
+          {song.durationLabel}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,10 @@
 **Date:** 2026-10-23  
 **Purpose:** Development handoff from Devin to Antigravity/OpenCode
 
+> **Update 2026-11-01:** Two rounds of work landed after this document was written and supersede parts of it — see the "Status Update" sections inline and `AI_CONTEXT.md` for current authority.
+> 1. **Landing page rebuilt** to the cream/ink editorial reference (film grain, four-tile `BrandMark`, height-aware headline, painterly `amply-wave` background). The "unresolved washed-out gradient" issue below is resolved; the player pages use the approved `.room-shell` cream gradient instead.
+> 2. **YouTube music search** added end-to-end: `GET /api/youtube/search` (server-side YT Data API v3 via `YOUTUBE_API_KEY`, cached + rate-limited), `MusicSearch` UI in Topbar/QueuePanel with add/play-now, queue route `playNow` + duplicate 409, and `QUEUE_UPDATE`/`PLAYBACK_COMMAND` socket broadcasts. `QueueInput.tsx` was deleted (superseded by `MusicSearch`). Requires `.env.local` with `YOUTUBE_API_KEY` (see `.env.example`); without it search returns 503 but direct YouTube URL adds still work.
+
 ---
 
 ## Current Project Status
@@ -28,7 +32,7 @@ Amply is a collaborative listening room web app where a host creates a room with
 | Styling | Tailwind CSS v4 | ^4 | `@theme` CSS variable approach, no `tailwind.config.js` |
 | Real-time | Socket.IO | 4.8.3 | Custom server (`server.js`) shares memory with API routes |
 | Media | YouTube IFrame API | Official | Direct API, not react-player |
-| Fonts | Inter, Fraunces | via `next/font` | Inter for UI, Fraunces for song titles |
+| Fonts | Inter, IBM Plex Mono | via `next/font` | Inter for UI, Plex Mono for codes/times/labels (Fraunces no longer loaded) |
 | Animations | Framer Motion | ^12.43 | Micro-animations |
 
 **Critical Server Setup:**
@@ -46,6 +50,9 @@ Amply is a collaborative listening room web app where a host creates a room with
 - ✅ Guest join (name + code validation)
 - ✅ YouTube video playback via IFrame API
 - ✅ Queue management (add songs, display queue)
+- ✅ YouTube music search (server-side Data API v3, `MusicSearch` UI, add + play-now, duplicate detection)
+- ✅ Direct YouTube URL add (canonicalized, oEmbed title, no API key needed)
+- ✅ Queue/playNow socket broadcast (`QUEUE_UPDATE` + `PLAYBACK_COMMAND`)
 - ✅ Host controls (play/pause/next/previous)
 - ✅ HTTP polling (2s interval) for full state sync
 - ✅ Socket.IO PLAY/PAUSE real-time commands to guests
@@ -111,69 +118,50 @@ Amply is a collaborative listening room web app where a host creates a room with
 ## UI/UX Status
 
 ### Landing Page (`/`)
-**Current Implementation:**
-- Warm ivory background (`oklch(97% 0.008 85)`)
-- Black typography (`oklch(12% 0.008 85)`)
-- Gradient background with multiple radial layers (pink, coral, violet, blue, green)
-- Film grain overlay
-- Two CTAs: "Host a Room" → `/host-setup`, "Join with Code" → `/join`
+**Current Implementation (rebuilt 2026-11-01):**
+- Cream background (`#f7f3e7`) with film grain overlay (`.grain`)
+- Four-tile `BrandMark` + wordmark header
+- Height-aware headline `clamp(27px, min(5.9vw, 8.4vh), 86px)`: "One room. Every device. / Perfectly together."
+- Two pill CTAs: "Host a Room" → `/host-setup`, "Join with Code" → `/join`
+- Signature painterly wave (`public/amply-wave.webp` / `amply-wave-mobile.webp`, 46s drift loop) with "Designed for shared listening." tagline
+- Verified by screenshot at 1440×900, 390×844, 1920×1080
 
-**Unresolved Design Issue:**
-The current landing page implementation does NOT match the reference image (`amply landing page.png`). The reference shows:
-- Rich, layered landscape gradient with vivid colors
-- Deep color saturation and proper composition
-- Cinematic, textured appearance
-
-The current implementation appears pale and washed out. The gradient layers are present but lack the intended color depth, saturation, and composition. This is an **unresolved visual issue** that the next agent must address by:
-1. Inspecting the reference image directly
-2. Comparing against the current rendered page
-3. Adjusting gradient colors, opacity, and composition to match
-4. Preserving the warm ivory upper portion and black typography
+**Resolved Design Issue (was "unresolved" in the 2026-10-23 handoff):**
+The old radial-gradient landing matched neither the reference nor the approved notes. It was replaced with the wave-based editorial layout above, following `sync research/Amply_UI_UX_Design_Notes.md`. The old "pale gradient" problem no longer applies.
 
 ### Player Pages (`/host/[code]`, `/room/[code]`)
 **Layout (MUST BE PRESERVED):**
-- 68px Topbar: BrandMark, RoomCodeChip, AvatarStack, leave button
+- Topbar: BrandMark, RoomCodeChip, MusicSearch (desktop), AvatarStack, leave button
 - Two-column grid: main stage (left) + 384px QueuePanel (right)
-- Stage: PlayerArt (vinyl + album card), track meta, ProgressBar, PlaybackControls (host only)
-- QueuePanel: header, QueueInput, scrollable QueueRow list, footer
+- Stage: `RoomScreen` (VinylRecord + PlaybackOrbit, track meta, seekable orbit, PlaybackControls host-only)
+- QueuePanel: header, MusicSearch (mobile), scrollable QueueRow list, footer
 
 **Current Styling:**
-- Light theme with warm ivory background
-- Same gradient layers as landing page (positioned at bottom)
-- Film grain overlay
-- Vinyl adapted for light theme (lighter vinyl, appropriate shadows)
-- Surfaces and controls adapted for light theme
+- Cream/ink editorial theme (`.room-shell`: cream radial + vertical gradient `#f7f3e7 → #efe8d8 → #ded5c3`)
+- Vinyl stage with `.vinyl-wash` coral radial tint
+- Surfaces and controls in the cream palette (see tokens below)
 
-**Visual Inconsistency:**
-The player pages share the same light theme implementation as the landing page, which means they inherit the same unresolved visual issue. The gradient lacks the intended richness and saturation. The next agent should:
-1. Fix the landing page gradient first (source of truth)
-2. Apply the corrected visual language to player pages
-3. Preserve all layout positions and functionality
-4. Ensure queue surfaces, inputs, and controls remain readable
+**Status:** The old "unresolved visual inconsistency" with the landing page no longer applies — the landing was rebuilt (see top note) and the room pages use the approved `.room-shell` treatment. Layout positions and functionality are preserved.
 
-### Design Tokens (Current - Light Theme)
+### Design Tokens (Current — cream/ink, from `src/app/globals.css`)
 ```css
---color-background: oklch(97% 0.008 85)      /* Warm ivory */
---color-background-2: oklch(95% 0.006 85)
---color-surface: oklch(98% 0.004 85)
---color-surface-2: oklch(96% 0.006 85)
---color-primary: oklch(12% 0.008 85)        /* Near-black */
---color-secondary: oklch(45% 0.008 85)      /* Muted gray */
---color-accent: oklch(72% 0.12 25)         /* Pink/coral */
---color-accent-hi: oklch(75% 0.10 25)
---color-success: oklch(65% 0.15 145)
---color-border-subtle: oklch(12% 0.008 85 / 0.08)
---color-border-strong: oklch(12% 0.008 85 / 0.12)
+--color-background: #f7f3e7       /* Cream */
+--color-background-2: #efe8d8
+--color-surface: #fbf8f0
+--color-surface-2: #e9e2d3
+--color-primary: #080808          /* Ink */
+--color-secondary: #666055        /* Muted warm gray */
+--color-accent: #d94135           /* Coral */
+--color-accent-hi: #c6372e
+--color-coral-text: #b9342b
+--color-blue-violet: #465fb0
+--color-olive: #a1a18a
+--color-success: #4f8a5b
+--color-border-subtle: rgba(8, 8, 8, 0.10)
+--color-border-strong: rgba(8, 8, 8, 0.18)
 ```
 
-**Original Dark Theme (before light conversion):**
-```css
---color-background: oklch(15% 0.008 60)      /* Near-black */
---color-primary: oklch(94% 0.012 75)        /* White */
---color-accent: oklch(72% 0.11 28)         /* Amber */
-```
-
-The light theme conversion is incomplete and does not match the reference design.
+**Historical themes (no longer in source):** the original dark oklch theme (`--color-background: oklch(15% 0.008 60)`, amber accent) and an interim light oklch conversion. See git history.
 
 ---
 
@@ -225,15 +213,19 @@ npm run lint         # ESLint (has pre-existing errors unrelated to recent chang
 | `src/lib/clock-sync.ts` | NTP-style clock estimator (client-only, not consumed by playback) |
 | `src/lib/youtube.ts` | Video ID extraction, thumbnail URL builder |
 | `src/app/globals.css` | Tailwind v4 `@theme` tokens, vinyl styling, stage glows, film grain |
-| `src/app/layout.tsx` | Root layout, font imports (Inter, Fraunces) |
-| `src/app/page.tsx` | Landing page with gradient background |
+| `src/app/layout.tsx` | Root layout, font imports (Inter, IBM Plex Mono) |
+| `src/app/page.tsx` | Landing page (cream/ink editorial, film grain, painterly wave) |
 | `src/app/host/[code]/page.tsx` | Host room view, Socket.IO, polling, clock sync |
 | `src/app/room/[code]/page.tsx` | Guest room view, Socket.IO, polling, clock sync |
 | `src/components/ui/HostPlayer.tsx` | YouTube IFrame player, pre-cue, generation guard, progress sync |
 | `src/components/ui/GuestPlayer.tsx` | YouTube IFrame player, pre-cue, drift correction, socket commands |
-| `src/components/ui/NowPlayingStage.tsx` | Full stage (art, meta, progress, controls, keyboard shortcuts) |
-| `src/components/ui/Topbar.tsx` | Room header (brand, code chip, avatars, leave) |
-| `src/components/ui/QueuePanel.tsx` | Right queue rail (header, input, list, footer) |
+| `src/components/ui/RoomScreen.tsx` | Presentational room layout (host \| guest): Topbar, vinyl stage, track meta, queue, keyboard shortcuts |
+| `src/components/ui/Topbar.tsx` | Room header (brand, code chip, MusicSearch, avatars, leave) |
+| `src/components/ui/QueuePanel.tsx` | Right queue rail (header, MusicSearch, list, footer) |
+| `src/components/ui/MusicSearch.tsx` | Debounced YouTube search + direct-link add, results with Add / Play-now |
+| `src/app/api/youtube/search/route.ts` | GET /api/youtube/search - server-side YT Data API v3 (needs YOUTUBE_API_KEY) |
+| `src/lib/youtube-search.ts` | Query sanitization, ISO-8601 duration, result normalization |
+| `src/lib/socket-server.ts` | QUEUE_UPDATE / PLAYBACK_COMMAND emitters via global.io |
 | `src/app/api/rooms/route.ts` | POST /api/rooms - create room |
 | `src/app/api/rooms/[code]/route.ts` | GET /api/rooms/:code - fetch state |
 | `src/app/api/rooms/[code]/join/route.ts` | POST .../join - add guest |
@@ -244,44 +236,54 @@ npm run lint         # ESLint (has pre-existing errors unrelated to recent chang
 
 ## Current Git State
 
-**Modified Files (uncommitted):**
-- `server.js` - Added shared roomsStore, NEXT/PREVIOUS Socket.IO handlers
-- `src/lib/store.ts` - Added `revision` field to RoomData
-- `src/app/api/rooms/[code]/player/route.ts` - Revision increment on progress updates
-- `src/app/api/rooms/route.ts` - Revision initialization on room creation
-- `src/app/globals.css` - Light theme conversion (unresolved visual issue)
-- `src/app/page.tsx` - Added gradient background (unresolved visual issue)
-- `src/app/host/[code]/page.tsx` - Added gradient background (unresolved visual issue)
-- `src/app/room/[code]/page.tsx` - Added gradient background (unresolved visual issue)
-- `src/components/ui/Button.tsx` - Light theme button styles
-- `src/components/ui/HostPlayer.tsx` - Pre-cue player implementation
-- `src/components/ui/GuestPlayer.tsx` - Pre-cue player implementation
+**As of 2026-11-01 (all uncommitted — preserve everything):**
 
-**Untracked Files:**
-- `amply landing page.png` - Reference image for intended visual design
-- `amply player screen.png` - Reference image for player page
+Modified:
+- `.gitignore` - Allow `.env.example`
+- `AI_CONTEXT.md` - Current technical authority (updated for search + landing)
+- `server.js` - `global.io` exposure for queue broadcasts
+- `src/app/api/rooms/[code]/queue/route.ts` - Search metadata, `playNow`, duplicates 409, socket broadcasts
+- `src/app/globals.css` - Cream/ink tokens, landing wave/grain, music-search styles
+- `src/app/host/[code]/page.tsx`, `src/app/room/[code]/page.tsx` - `QUEUE_UPDATE` listeners
+- `src/app/page.tsx` - Rebuilt landing page
+- `src/components/ui/BrandMark.tsx` - Four-tile mark
+- `src/components/ui/QueuePanel.tsx`, `QueueRow.tsx`, `RoomScreen.tsx`, `Topbar.tsx` - MusicSearch integration, duration/channel rows
+- `src/lib/store.ts`, `src/lib/track-metadata.ts`, `src/lib/youtube.ts` - QueueItem fields, `stripChannelPrefix`, strict parsing
 
-**Pre-existing Modified Files (from earlier work):**
-- These files contain functional improvements (sync, pre-cue, etc.) that should be preserved
+Deleted:
+- `src/components/ui/QueueInput.tsx` - Superseded by `MusicSearch`
+
+Untracked:
+- `.env.example` - `YOUTUBE_API_KEY` / `YOUTUBE_API_BASE_URL` documentation
+- `src/app/api/youtube/` - Search route
+- `src/components/ui/MusicSearch.tsx`
+- `src/lib/socket-server.ts`, `src/lib/youtube-search.ts`
+- `amply landing page.png`, `amply player screen.png` - Reference images
+
+**Run `git status --short` before any change and preserve all of the above.**
 
 ---
 
 ## Build & Test Results
 
-**Build Status:**
+**Build Status (2026-11-01):**
 ```bash
-npm run build
+npx tsc --noEmit   # ✅ passes
+npm run build      # ✅ passes (Next 16.3, all routes generated)
+node --check server.js  # ✅ passes
 ```
-Result: ✅ Successful - No build errors
 
 **Lint Status:**
 ```bash
 npm run lint
 ```
-Result: ⚠️ Pre-existing errors (119 problems, 100 errors, 19 warnings)
-- Most errors are in `server.js` (require() style imports), experiment pages, and unused variables
-- These errors existed before recent visual changes
-- Not related to the visual design issue
+Result: ⚠️ Pre-existing backlog (591 findings: 105 errors, 486 warnings) — mostly legacy `HostPlayer`/`GuestPlayer` hooks/`any`, `prefer-const` in room pages, and `tmp/` scripts. Scoped `npx eslint` over every file changed for the landing/search work reports zero findings.
+
+**Integration checks (ad-hoc scripts in session temp dir, no `npm test`):**
+- `youtube-parse-test.mjs` — 21 URL-parsing checks ✅
+- `search-api-test.js` — 23 search API checks (cache, rate limit, error mapping) ✅
+- `queue-socket-test.js` — 35 queue/socket checks (duplicates, playNow, broadcasts) ✅
+- Browser UI: host/guest search → add → auto-play → play-now → pause/resume/Next/Previous with real YouTube playback ✅
 
 **Dev Server:**
 ```bash
@@ -289,8 +291,8 @@ npm run dev
 ```
 Result: ✅ Running at http://localhost:3000
 - Custom server successfully boots Next.js + Socket.IO
-- Room creation, joining, and playback functional
-- Socket.IO events working (PLAY, PAUSE, NEXT, PREVIOUS, CLOCK_SYNC)
+- Room creation, joining, playback, search and queue broadcasts functional
+- Socket.IO events working (PLAY, PAUSE, NEXT, PREVIOUS, QUEUE_UPDATE, PLAYBACK_COMMAND, CLOCK_SYNC)
 
 ---
 
@@ -303,21 +305,13 @@ Result: ✅ Running at http://localhost:3000
 4. **Room expiry** - Ensure cleanup function is called consistently (24h TTL)
 
 ### Functional Completeness
-5. **SEEK event handling on guests** - Currently logged but not consumed; guests should seek when host seeks
-6. **Error boundaries** - Surface errors to UI instead of silent failures
-7. **Keyboard shortcuts on guest** - Consider adding limited shortcuts or explicit opt-in
+5. **Error boundaries** - Surface errors to UI instead of silent failures
+6. **Keyboard shortcuts on guest** - Consider adding limited shortcuts or explicit opt-in
+7. **Live YouTube API verification** - Validate search with a real `YOUTUBE_API_KEY` (quota, `videoSyndicated`)
 
-### Visual Design (HIGH PRIORITY)
-8. **Fix landing page gradient** - Match reference image (`amply landing page.png`)
-   - Inspect reference for exact color values, saturation, composition
-   - Adjust gradient layers (currently pale/washed out)
-   - Ensure rich, layered landscape with vivid colors
-   - Preserve warm ivory upper portion and black typography
-9. **Apply corrected visual language to player pages** - After landing page is fixed
-   - Use same corrected gradient approach
-   - Preserve all layout positions and functionality
-   - Ensure queue surfaces, inputs, controls remain readable
-   - Keep vinyl artwork prominent
+### Visual Design
+8. ~~Fix landing page gradient~~ - **Done (2026-11-01):** rebuilt to the cream/ink editorial reference with painterly wave.
+9. **Continue against approved v1.0 notes** - `sync research/Amply_UI_UX_Design_Notes.md` remains authoritative; record deltas in `DESIGN.md`.
 
 ### Testing & Reliability
 10. **Add E2E tests** - Test room creation, joining, playback, sync
@@ -326,7 +320,7 @@ Result: ✅ Running at http://localhost:3000
 
 ### Deployment & Polish
 13. **Persistent storage** - Replace in-memory Map with Redis or database
-14. **Multi-instance support** - Enable horizontal scaling
+14. **Multi-instance support** - Enable horizontal scaling (search cache/rate limiter are also single-process)
 15. **Performance optimization** - Optimize polling frequency, reduce API load
 16. **Mobile responsiveness audit** - Verify layout on mobile devices
 
@@ -334,23 +328,18 @@ Result: ✅ Running at http://localhost:3000
 
 ## Immediate Next Step
 
-**Task:** Fix the landing page visual design to match the reference image.
+**Task:** Verify music search against a real `YOUTUBE_API_KEY`, then commit the accumulated work.
 
-**Rationale:** The current light theme implementation does not match the intended design. The gradient appears pale and washed out compared to the rich, layered landscape in the reference. This is the most visible user-facing issue and should be addressed before other enhancements.
+**Rationale:** The landing rebuild and the full music-search feature are implemented and verified against a local mock, but remain uncommitted and the live YouTube API path is unverified (no key in this environment).
 
 **Approach:**
-1. Open `amply landing page.png` reference image
-2. Run `npm run dev` and view http://localhost:3000
-3. Compare current rendered page against reference
-4. Adjust gradient in `src/app/page.tsx` (and potentially `src/app/globals.css`) to match:
-   - Color saturation and depth
-   - Gradient composition and layering
-   - Overall visual richness
-5. Test that changes preserve warm ivory upper portion and black typography
-6. Do NOT change layout or functionality
-7. Once landing page is correct, apply same approach to player pages
+1. Inspect `git status --short` — preserve all modified/untracked work (landing + search + queue changes).
+2. Copy `.env.example` to `.env.local` and set a real `YOUTUBE_API_KEY`.
+3. Run `npm run dev`, search in a room, and confirm live results/quota behavior.
+4. Run `npx tsc --noEmit`, `npm run build`, and scoped `eslint` on changed files.
+5. Update the testing record in `AI_CONTEXT.md`, then commit.
 
-**Risk:** Low - Visual changes only, no functional impact
+**Risk:** Low - no architectural change; the key is server-side only and never exposed to the client.
 
 ---
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { QueueItem } from "@/lib/store";
-import { parseTrackMetadata } from "@/lib/track-metadata";
+import { parseTrackMetadata, stripChannelPrefix } from "@/lib/track-metadata";
+import { getYouTubeVideoId } from "@/lib/youtube";
 import { Topbar } from "@/components/ui/Topbar";
 import { QueuePanel } from "@/components/ui/QueuePanel";
 import { PlaybackControls } from "@/components/ui/PlaybackControls";
@@ -61,13 +62,19 @@ export function RoomScreen({
       ? "Connecting"
       : "Ready when you are";
 
-  const metadata = currentSong ? parseTrackMetadata(currentSong.title) : null;
+  const metadata = currentSong
+    ? parseTrackMetadata(stripChannelPrefix(currentSong.title, currentSong.channelTitle))
+    : null;
   const songTitle = metadata?.title || currentSong?.title;
   const artistLabel = currentSong
-    ? metadata?.artist ?? "Unknown artist"
+    ? currentSong.channelTitle ?? metadata?.artist ?? "Unknown artist"
     : isHost
       ? "Your listening room"
       : "Shared listening room";
+
+  const queuedVideoIds = queue
+    .map((song) => song.videoId || getYouTubeVideoId(song.url))
+    .filter((videoId): videoId is string => Boolean(videoId));
 
   useEffect(() => {
     if (!isHost || !currentSong) return;
@@ -100,7 +107,13 @@ export function RoomScreen({
       <div className="grain" aria-hidden="true" />
       <Toast />
 
-      <Topbar code={code} members={members} onLeave={onLeave} />
+      <Topbar
+        code={code}
+        members={members}
+        onLeave={onLeave}
+        canPlayNow={isHost}
+        queuedVideoIds={queuedVideoIds}
+      />
 
       <main className="relative flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,42fr)_minmax(0,58fr)] lg:overflow-hidden">
         <section
@@ -175,6 +188,8 @@ export function RoomScreen({
             loading={loading}
             expanded={queueExpanded}
             onToggle={() => setQueueExpanded((open) => !open)}
+            canPlayNow={isHost}
+            queuedVideoIds={queuedVideoIds}
             className="mt-7 flex-none sm:mt-5 lg:mt-8 lg:min-h-0 lg:flex-1"
           />
 

@@ -1,22 +1,66 @@
 export const THUMBNAIL_QUALITIES = ["maxresdefault", "hqdefault", "mqdefault"] as const;
 
-export function getYouTubeVideoId(url: string): string {
-  if (!url) return "";
+const VIDEO_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
 
-  const v = url.split("v=")[1]?.split("&")[0];
-  if (v) return v;
+/** True when `value` is a syntactically valid 11-character YouTube video ID. */
+export function isValidYouTubeVideoId(value: string | null | undefined): value is string {
+  return typeof value === "string" && VIDEO_ID_RE.test(value);
+}
 
-  const youtuBeMatch = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  if (youtuBeMatch) return youtuBeMatch[1];
+/**
+ * Extract a canonical YouTube video ID from a URL or a bare ID.
+ *
+ * Supported forms: `watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, `/live/`,
+ * `/v/`, `music.youtube.com`, and `youtube-nocookie.com`. Anything else
+ * returns an empty string so invalid input is never silently queued.
+ */
+export function getYouTubeVideoId(input: string): string {
+  if (!input) return "";
 
-  const embedMatch = url.match(/embed\/([a-zA-Z0-9_-]{11})/);
-  if (embedMatch) return embedMatch[1];
+  const raw = input.trim();
+  if (!raw) return "";
+  if (isValidYouTubeVideoId(raw)) return raw;
+
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return "";
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^(www|m)\./, "");
+  const isYouTubeHost =
+    host === "youtube.com" ||
+    host === "music.youtube.com" ||
+    host === "youtu.be" ||
+    host === "youtube-nocookie.com";
+
+  if (!isYouTubeHost) return "";
+
+  if (host === "youtu.be") {
+    const id = url.pathname.split("/").filter(Boolean)[0] ?? "";
+    return isValidYouTubeVideoId(id) ? id : "";
+  }
+
+  const queryId = url.searchParams.get("v");
+  if (isValidYouTubeVideoId(queryId)) return queryId;
+
+  const pathMatch = url.pathname.match(/^\/(?:embed|shorts|live|v)\/([a-zA-Z0-9_-]{11})(?:\/|$)/);
+  if (pathMatch) return pathMatch[1];
 
   return "";
 }
 
-export function getYouTubeThumbnailUrl(url: string): string {
-  const videoId = getYouTubeVideoId(url);
-  if (!videoId) return "";
+/** Canonical watch URL used for every queued item. */
+export function getYouTubeWatchUrl(videoId: string): string {
+  return isValidYouTubeVideoId(videoId) ? `https://www.youtube.com/watch?v=${videoId}` : "";
+}
+
+export function getYouTubeThumbnailUrlById(videoId: string): string {
+  if (!isValidYouTubeVideoId(videoId)) return "";
   return `https://img.youtube.com/vi/${videoId}/${THUMBNAIL_QUALITIES[0]}.jpg`;
+}
+
+export function getYouTubeThumbnailUrl(url: string): string {
+  return getYouTubeThumbnailUrlById(getYouTubeVideoId(url));
 }

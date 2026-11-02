@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Amply
+
+**One room. Every device. Perfectly together.**
+
+Amply is a collaborative YouTube listening room. A host creates a room and shares a six-character code; guests join with a name and code and hear the same track at the same position. The host is the playback authority — anyone in the room can add tracks to the shared queue, but only the host controls playback.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`npm run dev` runs `server.js`, which boots Next.js and Socket.IO in **one Node process**. Do not run `next dev` directly when working on room/playback features — it will not expose `/socket.io` or share the in-memory room store with the API routes.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Environment variables (music search)
 
-## Learn More
+Music search uses the official YouTube Data API v3, called **server-side only**:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+cp .env.example .env.local
+# then edit .env.local and set YOUTUBE_API_KEY=<your key>
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Variable | Required | Purpose |
+|---|---|---|
+| `YOUTUBE_API_KEY` | For search | YouTube Data API v3 key. Never sent to the client. |
+| `YOUTUBE_API_BASE_URL` | No (tests) | Overrides the API origin (defaults to `https://www.googleapis.com/youtube/v3`). |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Without a key, `GET /api/youtube/search` returns 503 and the search UI shows a configuration message — **direct YouTube URL adds still work** (title resolved via oEmbed, no key needed).
 
-## Deploy on Vercel
+## Features
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Rooms:** host creates a 6-char code, guests join by name + code, no accounts.
+- **Music search:** search by song/artist/keywords from the room header (desktop) or queue panel (mobile); results show thumbnail, title, channel and duration with **Add to queue** and **Play now** (host only). Debounced, cached server-side (5 min), rate-limited (30/min/IP).
+- **Direct links:** paste any YouTube URL (`watch?v=`, `youtu.be`, `/embed`, `/shorts`, `/live`) — canonicalized and de-duplicated (409 on repeats).
+- **Sync:** host-authoritative playback over the YouTube IFrame API; 2-second HTTP polling as reconciliation with Socket.IO (`PLAYBACK_COMMAND`, `QUEUE_UPDATE`) as the real-time overlay.
+- **Controls:** play/pause/next/previous, seek, keyboard shortcuts (Space, ←/→) on the host.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Commands
+
+```bash
+npm run dev      # Development (custom server: Next.js + Socket.IO)
+npm run build    # Production build
+npm run start    # Production server (next start — does NOT start Socket.IO)
+npm run lint     # ESLint (has a pre-existing finding backlog)
+npx tsc --noEmit # Type check
+```
+
+## Architecture
+
+- Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Socket.IO.
+- Room state lives in an in-memory `Map` (`src/lib/store.ts`) shared between API routes and Socket.IO handlers — rooms do not survive a restart and this is not multi-instance safe.
+- `src/lib/youtube.ts` is the single source of truth for video-ID/URL parsing; `src/lib/youtube-search.ts` normalizes search results.
+- Design tokens live in `src/app/globals.css` (cream/ink/coral editorial palette).
+
+See `AI_CONTEXT.md` for the full technical overview and `DESIGN.md` for design status versus the approved direction in `sync research/Amply_UI_UX_Design_Notes.md`.

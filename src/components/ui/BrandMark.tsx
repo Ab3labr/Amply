@@ -4,7 +4,7 @@ interface BrandMarkProps {
 
 // Four interlocking "wave" tiles: the Amply glyph from the approved landing reference.
 const tile =
-  "M6.2 0 H13.5 Q16 0 18.25 2 L30.75 13 Q33 15 33 18 V28 Q33 31 30 31 H24 Q21 31 18.6 29.2 L5.9 19.3 Q3.5 17.5 3.5 14.5 V3 Q3.5 0 6.2 0 Z";
+  "M7 0 L14 0 Q16.5 0 18 2.4 C21 6.8 25 11.6 30 14.2 Q33 15.5 33 18.5 L33 28 Q33 31 30 31 L25 31 Q22 31 20.5 28.6 C16 22 9.5 17.6 5.5 15.5 Q3.5 14.5 3.5 12 L3.5 3 Q3.5 0 7 0 Z";
 
 export function BrandMark({ className = "" }: BrandMarkProps) {
   return (

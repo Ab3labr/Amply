@@ -2,18 +2,18 @@
 name: Amply
 description: "One room. Every device. Perfectly together."
 colors:
-  current-background: "oklch(97% 0.008 85)"
-  current-background-2: "oklch(95% 0.006 85)"
-  current-surface: "oklch(98% 0.004 85)"
-  current-surface-2: "oklch(96% 0.006 85)"
-  current-ink: "oklch(12% 0.008 85)"
-  current-muted: "oklch(45% 0.008 85)"
-  current-accent: "oklch(72% 0.12 25)"
-  current-accent-hi: "oklch(75% 0.10 25)"
-  current-accent-dim: "oklch(72% 0.12 25 / 0.14)"
-  current-success: "oklch(65% 0.15 145)"
-  current-border-subtle: "oklch(12% 0.008 85 / 0.08)"
-  current-border-strong: "oklch(12% 0.008 85 / 0.12)"
+  current-background: "#f7f3e7"
+  current-background-2: "#efe8d8"
+  current-surface: "#fbf8f0"
+  current-surface-2: "#e9e2d3"
+  current-ink: "#080808"
+  current-muted: "#666055"
+  current-accent: "#d94135"
+  current-accent-hi: "#c6372e"
+  current-accent-dim: "rgba(217, 65, 53, 0.14)"
+  current-success: "#4f8a5b"
+  current-border-subtle: "rgba(8, 8, 8, 0.10)"
+  current-border-strong: "rgba(8, 8, 8, 0.18)"
   approved-cream: "#F7F3E7"
   approved-ink: "#080808"
   approved-coral: "#D94135"
@@ -167,13 +167,13 @@ components:
 
 **Status: current implementation audit (2026-11-01).** This file records the live UI in `src/` and its differences from the approved design. `sync research/Amply_UI_UX_Design_Notes.md` v1.0 remains authoritative for intended design decisions; this file is authoritative only for current implementation status. Source code is the final authority for what is rendered.
 
-**Implementation status:** Partial. The current build has the light palette, black vinyl, separate playback orbit, real thumbnail artwork, track title/artist parsing, queue, participant stack and responsive host/guest room views. The approved painterly landing wave and several detailed queue/art direction rules are not fully implemented. The orbit marker is a display interpolation from IFrame samples, not the playback clock. Playback permissions remain host-only in the UI.
+**Implementation status:** Partial. The current build has the light palette, black vinyl, separate playback orbit, real thumbnail artwork, track title/artist parsing, queue with search, participant stack and responsive host/guest room views. The approved painterly landing wave is now implemented (2026-11-01: `public/amply-wave.webp` + film grain + upper-left wordmark + two-line headline + pill actions + caption); several detailed queue/art direction rules remain approximate. The orbit marker is a display interpolation from IFrame samples, not the playback clock. Playback permissions remain host-only in the UI.
 
 **Creative North Star: "The Editorial Record Player"** *(derived from the approved v1.0 notes, not a new direction)*
 
 The approved product should feel like a carefully art-directed music object: a cream-and-ink editorial composition where an oversized black record anchors the left, a thin coral orbit tracks real playback, and the song title, real artwork and integrated queue form one calm right-hand composition. The landing page carries the same identity through a large painterly wave. The music is the event; the interface is the frame.
 
-The current implementation uses a warm cream background, near-black ink, coral accent and blue-violet secondary text. The room player has a large vinyl and independent progress orbit on the left; track title, separate artwork, shared queue and controls on the right. It is not the previous tilted-artwork-on-vinyl layout and has no Fraunces title or bordered fixed-width queue rail. The landing page uses layered CSS radial/linear gradients rather than the approved painterly wave asset. This is a partial implementation, not a claim of full design parity.
+The current implementation uses a warm cream background, near-black ink, coral accent and blue-violet secondary text. The room player has a large vinyl and independent progress orbit on the left; track title, separate artwork, shared queue and controls on the right. It is not the previous tilted-artwork-on-vinyl layout and has no Fraunces title or bordered fixed-width queue rail. The landing page uses the approved painterly wave asset (`amply-wave.webp`) with film grain, an upper-left wordmark, a two-line headline, two pill actions and an overlaid caption. This is a partial implementation, not a claim of full design parity.
 
 **Key Characteristics:**
 - Current: warm cream ground, near-black ink, coral accent, Inter title, left vinyl with separate orbit, separate square artwork and unframed right-side queue.
@@ -184,7 +184,7 @@ The current implementation uses a warm cream background, near-black ink, coral a
 
 ## Colors
 
-The approved palette is cream and near-black first, coral second, blue-violet third, with the remaining painterly colours reserved for atmosphere. The current implementation uses the approved core hex values in `src/app/globals.css`; the landing gradient composition and some detailed treatments remain approximate.
+The approved palette is cream and near-black first, coral second, blue-violet third, with the remaining painterly colours reserved for atmosphere. The current implementation uses the approved core hex values in `src/app/globals.css`; the landing now uses the approved wave asset, while some detailed treatments remain approximate.
 
 ### Primary
 
@@ -254,7 +254,7 @@ The approved palette is cream and near-black first, coral second, blue-violet th
 
 The approved system is primarily **tonal and atmospheric**, not shadow-led. Depth comes from the cream-to-taupe background, the black vinyl as a physical mass, hairline separation, generous spacing and subtle film grain. Shadows are minimal; heavy drop shadows, glassmorphism and neon glows are explicitly rejected.
 
-The current implementation uses a cream-to-taupe room background, a subtle vinyl shadow, film grain and restrained tonal surfaces. The landing page's multicolour gradient is more geometric/radial than the approved painterly wave. There is no tilted album card or colored player-button glow.
+The current implementation uses a cream-to-taupe room background, a subtle vinyl shadow, film grain and restrained tonal surfaces. The landing page now uses the approved painterly wave asset with a slow drift loop. There is no tilted album card or colored player-button glow.
 
 ### Shadow Vocabulary
 
@@ -312,7 +312,7 @@ The current implementation uses a cream-to-taupe room background, a subtle vinyl
 
 ### Navigation
 
-- **Current landing/setup/join:** a centered "Amply" wordmark in the page flow. **Current room pages:** a 68px top bar with a small brand mark + wordmark, room-code chip, avatar stack with a host badge and count, and a quiet leave icon.
+- **Current landing/setup/join:** the landing has the wordmark + brand glyph upper left (per approved), setup/join keep a centered "Amply" wordmark in the page flow. **Current room pages:** a top bar with a small brand mark + wordmark, room-code chip, centered search input on desktop, avatar stack with a host badge and count, and a quiet leave icon.
 - **Approved landing:** the Amply wordmark sits at the upper left with the brand glyph; no competing navigation links.
 - **Approved room header:** compact (roughly 64–72px), wordmark and room-code chip on the left, the add-link input centered on desktop, and host indicator, participant avatars/count and exit on the right. On mobile, condense without losing room code, participants and exit; move the add-link input into the queue area if space is tight.
 
@@ -324,7 +324,7 @@ The current implementation uses a cream-to-taupe room background, a subtle vinyl
 
 **Current RoomScreen.** A shared host/guest responsive layout: Topbar; vinyl/orbit left region; title, parsed artist label, separate real thumbnail artwork, QueuePanel and PlaybackControls on the right. Host gets active controls and Space/arrow seek shortcuts; guest controls are disabled and accompanied by a host-only message.
 
-**Current QueuePanel / QueueRow.** Unframed queue with an "Up next" heading, track count, responsive QueueInput, scrollable rows and mobile collapse. Rows show square thumbnails, mono index, title, heuristic artist text and a current-track equalizer/state. Track durations and reorder/remove actions are not implemented. Queue changes other than the first auto-starting track are observed via room polling.
+**Current QueuePanel / QueueRow.** Unframed queue with an "Up next" heading, track count, responsive `MusicSearch` (search field + dropdown results; desktop it lives in the Topbar), scrollable rows and mobile collapse. Rows show square thumbnails, mono index, title with channel prefix stripped, mono channel label and right-aligned mono duration, plus a current-track equalizer/state. Reorder/remove actions are not implemented. Queue additions broadcast `QUEUE_UPDATE` over Socket.IO for immediate refetch; the two-second room poll remains the fallback. Direct-URL additions may lack a duration label (oEmbed provides none).
 
 **Approved Vinyl + Orbit.** A large, mostly black record with fine grooves, a separate cream/olive centre label and slow rotation tied to playback state. A separate thin coral orbit with a marker tied to actual playback progress; the marker starts at 12 o'clock and moves clockwise. Rotation and progress are independent animations. Seeking is host-only by default. The record is never tinted with album colours.
 

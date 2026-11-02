@@ -61,6 +61,11 @@ a:focus-visible,
   outline-offset: 3px;
 }
 
+/* The search field sits inside a pill that provides its own focus ring. */
+.music-search-input:focus-visible {
+  outline: none;
+}
+
 /* ============ Keyframes ============ */
 @keyframes amply-eq {
   0%, 100% { height: 25%; }

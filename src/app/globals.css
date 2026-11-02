@@ -85,27 +85,68 @@ a:focus-visible,
     transform: translate3d(0, 0, 0);
   }
 }
-/* The wave moves as one piece, then returns to its exact starting frame. The
-   middle beats keep the contour alive without reading as a repeating sway. */
+@keyframes amply-line-reveal {
+  from { transform: translate3d(0, 110%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes amply-enter-soft {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+/* ---- Landing wave currents ----
+   The raster artwork is the paint. Each coloured cell is a stationary,
+   soft-edged window holding an oversized copy of that same wave. The copy
+   wanders, stretches and skews inside the window, so genuine pigment shapes
+   travel through the painting instead of a gradient sliding behind it.
+   Every path starts and ends on the same frame, so the loop has no seam. */
 @keyframes amply-wave-drift {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.025); }
-  25% { transform: translate3d(-0.45%, -0.7%, 0) scale(1.04); }
-  50% { transform: translate3d(0.15%, -1.15%, 0) scale(1.055); }
-  75% { transform: translate3d(0.55%, -0.45%, 0) scale(1.04); }
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.012); }
+  30% { transform: translate3d(-0.9%, -0.5%, 0) scale(1.032); }
+  57% { transform: translate3d(0.7%, 0.6%, 0) scale(1.022); }
+  81% { transform: translate3d(0.3%, -0.8%, 0) scale(1.038); }
 }
 
-@keyframes amply-wave-current-a {
-  0%, 100% { transform: translate3d(-0.4%, 0.4%, 0) scale(1.045) rotate(-0.15deg); }
-  25% { transform: translate3d(0.4%, -0.5%, 0) scale(1.06) rotate(0.1deg); }
-  50% { transform: translate3d(0.8%, -0.9%, 0) scale(1.04) rotate(0.18deg); }
-  75% { transform: translate3d(-0.15%, -0.2%, 0) scale(1.055) rotate(-0.04deg); }
+@keyframes amply-current-pink {
+  0%, 100% { transform: translate3d(-3.6%, 2%, 0) scale(1.1, 1.06) skewX(-1.4deg); }
+  16% { transform: translate3d(0.8%, -2.4%, 0) scale(1.14, 1.1) skewX(0.6deg); }
+  37% { transform: translate3d(4.2%, 0.6%, 0) scale(1.09, 1.14) skewX(1.6deg); }
+  58% { transform: translate3d(1.2%, 3%, 0) scale(1.15, 1.07) skewX(-0.4deg); }
+  79% { transform: translate3d(-2.4%, -1.2%, 0) scale(1.11, 1.12) skewX(-1.8deg); }
 }
 
-@keyframes amply-wave-current-b {
-  0%, 100% { transform: translate3d(0.65%, -0.25%, 0) scale(1.06) rotate(0.12deg); }
-  25% { transform: translate3d(-0.35%, -0.85%, 0) scale(1.045) rotate(-0.08deg); }
-  50% { transform: translate3d(-0.75%, -0.2%, 0) scale(1.065) rotate(-0.16deg); }
-  75% { transform: translate3d(0.1%, 0.45%, 0) scale(1.05) rotate(0.03deg); }
+@keyframes amply-current-violet {
+  0%, 100% { transform: translate3d(3.8%, -2.2%, 0) scale(1.13, 1.08) skewX(1.2deg); }
+  21% { transform: translate3d(-0.6%, 1.6%, 0) scale(1.08, 1.14) skewX(-0.8deg); }
+  44% { transform: translate3d(-4.4%, 2.8%, 0) scale(1.15, 1.06) skewX(-1.5deg); }
+  66% { transform: translate3d(-0.8%, -2.6%, 0) scale(1.1, 1.12) skewX(0.5deg); }
+  83% { transform: translate3d(2.2%, -0.4%, 0) scale(1.16, 1.09) skewX(1.6deg); }
+}
+
+@keyframes amply-current-coral {
+  0%, 100% { transform: translate3d(-3.2%, -2.2%, 0) scale(1.12, 1.07) skewX(0.8deg); }
+  19% { transform: translate3d(2%, 3%, 0) scale(1.08, 1.12) skewX(-1.2deg); }
+  46% { transform: translate3d(4.8%, -1%, 0) scale(1.14, 1.05) skewX(-2deg); }
+  72% { transform: translate3d(-0.4%, 2.6%, 0) scale(1.09, 1.14) skewX(1deg); }
+}
+
+@keyframes amply-current-olive {
+  0%, 100% { transform: translate3d(-2%, 1.2%, 0) scale(1.06, 1.1) rotate(-0.4deg); }
+  27% { transform: translate3d(2.6%, -1.6%, 0) scale(1.12, 1.05) rotate(0.35deg); }
+  55% { transform: translate3d(0.8%, 2.2%, 0) scale(1.07, 1.13) rotate(-0.2deg); }
+  78% { transform: translate3d(-2.8%, -0.6%, 0) scale(1.13, 1.07) rotate(0.5deg); }
+}
+
+@keyframes amply-current-amber {
+  0%, 100% { transform: translate3d(2.6%, 2.2%, 0) scale(1.1, 1.06) skewX(-0.9deg); }
+  24% { transform: translate3d(-2.2%, -2.8%, 0) scale(1.06, 1.12) skewX(0.7deg); }
+  52% { transform: translate3d(-4%, 0.6%, 0) scale(1.14, 1.08) skewX(1.4deg); }
+  74% { transform: translate3d(0.4%, -2.8%, 0) scale(1.09, 1.13) skewX(-1.2deg); }
 }
 
 /* ============ Animation / effect primitives ============ */
@@ -257,61 +298,246 @@ a:focus-visible,
   .queue-scroll::-webkit-scrollbar-track { background: transparent; }
 
   /* ---- Landing page ---- */
-  .landing-rise {
-    animation: amply-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  .landing-enter--logo {
+    animation: amply-fade-in 0.55s ease-out both;
+  }
+
+  .landing-line {
+    display: block;
+    overflow: hidden;
+    padding-bottom: 0.1em;
+    margin-bottom: -0.1em;
+  }
+
+  .landing-line__inner {
+    display: block;
+    animation: amply-line-reveal 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .landing-line:nth-child(1) .landing-line__inner {
+    animation-delay: 80ms;
+  }
+
+  .landing-line:nth-child(2) .landing-line__inner {
+    animation-delay: 170ms;
+  }
+
+  .landing-enter--copy {
+    animation: amply-enter-soft 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 380ms;
+  }
+
+  .landing-enter--actions {
+    animation: amply-enter-soft 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 540ms;
+  }
+
+  .landing-enter--caption {
+    animation: amply-fade-in 0.8s ease-out both;
+    animation-delay: 700ms;
+  }
+
+  /* ---- Landing buttons ---- */
+  .landing-cta {
+    position: relative;
+    border: 1.5px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 0.3s ease,
+      border-color 0.3s ease,
+      color 0.3s ease,
+      box-shadow 0.35s ease;
+    will-change: transform;
+  }
+
+  .landing-cta__arrow {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .landing-cta--solid {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-background);
+  }
+
+  .landing-cta--outline {
+    background-color: transparent;
+    border-color: rgba(8, 8, 8, 0.8);
+    color: var(--color-primary);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .landing-cta--solid:hover {
+      background-color: #1d1d1d;
+      border-color: #1d1d1d;
+      box-shadow: 0 16px 32px -18px rgba(8, 8, 8, 0.7);
+      transform: translate3d(0, -2px, 0) scale(1.012);
+    }
+
+    .landing-cta--outline:hover {
+      background-color: rgba(8, 8, 8, 0.045);
+      box-shadow: 0 14px 30px -22px rgba(8, 8, 8, 0.5);
+      transform: translate3d(0, -2px, 0) scale(1.012);
+    }
+
+    .landing-cta:hover .landing-cta__arrow {
+      transform: translate3d(4px, 0, 0);
+    }
+  }
+
+  .landing-cta:active {
+    transform: translate3d(0, 1px, 0) scale(0.985);
+    box-shadow: 0 2px 8px -6px rgba(8, 8, 8, 0.5);
+    transition-duration: 0.12s;
   }
 
   .landing-wave-mask {
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 15%, #000 100%);
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 15%, #000 100%);
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
   }
 
   .landing-wave {
-    position: relative;
+    --wave-art: url("/amply-wave-mobile.webp");
+    --wave-art-position: 38% bottom;
+    --wave-px: 0px;
+    --wave-py: 0px;
+    --wave-rot: 0deg;
+    position: absolute;
+    inset: 0;
     isolation: isolate;
     overflow: hidden;
-    background-image: url("/amply-wave-mobile.webp");
+    background-image: var(--wave-art);
     background-repeat: no-repeat;
     background-size: cover;
-    background-position: 38% bottom;
+    background-position: var(--wave-art-position);
     transform-origin: 50% 100%;
-    animation: amply-wave-drift 31s linear infinite;
+    animation: amply-wave-drift 21s cubic-bezier(0.45, 0, 0.55, 1) infinite;
     will-change: transform;
   }
 
-  /* Reusing the original artwork as translucent pigment layers keeps the
-     painterly grain and palette intact. Each layer travels on its own quiet
-     24/36-second current, creating depth rather than independent blobs. */
-  .landing-wave::before,
-  .landing-wave::after {
-    content: "";
+  /* Each pigment layer leans toward a fine pointer at its own strength. The
+     wrapper composes with the artwork's own current, so the painting keeps
+     flowing while it responds. */
+  .wave-cell__parallax {
     position: absolute;
-    inset: -5%;
-    z-index: 0;
-    background-image: inherit;
-    background-repeat: inherit;
-    background-size: 103% 103%;
-    background-position: inherit;
-    pointer-events: none;
+    inset: 0;
+    transform:
+      translate3d(
+        calc(var(--wave-px) * var(--wave-depth, 1)),
+        calc(var(--wave-py) * var(--wave-depth, 1)),
+        0
+      )
+      rotate(calc(var(--wave-rot) * var(--wave-depth, 1)));
     will-change: transform;
   }
 
-  .landing-wave::before {
-    opacity: 0.14;
-    mix-blend-mode: multiply;
-    animation: amply-wave-current-a 24s linear infinite;
+  /* A cell is only a soft window. Its artwork is larger than the cell and
+     moves independently, so colour crosses the window rather than the window
+     crossing the page. Overlapping fades keep the joins painterly. */
+  .wave-cell {
+    position: absolute;
+    inset: -6%;
+    pointer-events: none;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+    transform: translateZ(0);
   }
 
-  .landing-wave::after {
-    opacity: 0.1;
+  .wave-cell__art {
+    position: absolute;
+    inset: -14%;
+    background-image: var(--wave-art);
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: var(--wave-art-position);
+    transform-origin: 50% 68%;
+    backface-visibility: hidden;
+    will-change: transform;
+  }
+
+  .wave-cell--pink {
+    --wave-depth: 1.2;
+    opacity: 0.92;
+    -webkit-mask-image: radial-gradient(56% 94% at 14% 64%, black 0%, black 34%, transparent 80%);
+    mask-image: radial-gradient(56% 94% at 14% 64%, black 0%, black 34%, transparent 80%);
+  }
+  .wave-cell--pink .wave-cell__art {
+    animation: amply-current-pink 17s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation-delay: -6s;
+  }
+
+  .wave-cell--violet {
+    --wave-depth: -0.78;
+    opacity: 0.82;
+    -webkit-mask-image: radial-gradient(62% 88% at 72% 26%, black 0%, black 34%, transparent 82%);
+    mask-image: radial-gradient(62% 88% at 72% 26%, black 0%, black 34%, transparent 82%);
+  }
+  .wave-cell--violet .wave-cell__art {
+    animation: amply-current-violet 19s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation-delay: -11s;
+  }
+
+  .wave-cell--coral {
+    --wave-depth: 0.58;
+    opacity: 0.86;
+    -webkit-mask-image: radial-gradient(70% 74% at 52% 98%, black 0%, black 36%, transparent 84%);
+    mask-image: radial-gradient(70% 74% at 52% 98%, black 0%, black 36%, transparent 84%);
+  }
+  .wave-cell--coral .wave-cell__art {
+    animation: amply-current-coral 14s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation-delay: -4s;
+  }
+
+  .wave-cell--olive {
+    --wave-depth: -1.32;
+    opacity: 0.68;
+    mix-blend-mode: soft-light;
+    -webkit-mask-image: radial-gradient(38% 52% at 44% 52%, black 0%, black 30%, transparent 82%);
+    mask-image: radial-gradient(38% 52% at 44% 52%, black 0%, black 30%, transparent 82%);
+  }
+  .wave-cell--olive .wave-cell__art {
+    animation: amply-current-olive 11s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation-delay: -2s;
+  }
+
+  .wave-cell--amber {
+    --wave-depth: 0.34;
+    opacity: 0.5;
     mix-blend-mode: screen;
-    animation: amply-wave-current-b 37s linear infinite reverse;
+    -webkit-mask-image: radial-gradient(46% 62% at 86% 74%, black 0%, black 26%, transparent 82%);
+    mask-image: radial-gradient(46% 62% at 86% 74%, black 0%, black 26%, transparent 82%);
+  }
+  .wave-cell--amber .wave-cell__art {
+    animation: amply-current-amber 16s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation-delay: -9s;
+  }
+
+  /* ---- Listening steps reveal ---- */
+  .listening-steps .step-reveal {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0);
+    transition:
+      opacity 0.75s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: calc(var(--step-index, 0) * 90ms);
+  }
+
+  .listening-steps[data-revealed="true"] .step-reveal {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 
   @media (min-width: 768px) {
     .landing-wave {
-      background-image: url("/amply-wave.webp");
-      background-position: 50% bottom;
+      --wave-art: url("/amply-wave.webp");
+      --wave-art-position: 50% bottom;
     }
   }
 }
@@ -320,11 +546,35 @@ a:focus-visible,
   .track-swap {
     animation: none;
   }
-  .landing-rise,
-  .landing-wave,
-  .landing-wave::before,
-  .landing-wave::after {
+  .landing-enter--logo,
+  .landing-line__inner,
+  .landing-enter--copy,
+  .landing-enter--actions,
+  .landing-enter--caption,
+  .landing-wave {
     animation: none;
+  }
+  .wave-cell {
+    display: none;
+  }
+  .wave-cell__parallax {
+    transform: none;
+  }
+  .listening-steps .step-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .landing-cta,
+  .landing-cta__arrow {
+    transition: none;
+  }
+  .landing-cta:hover,
+  .landing-cta:active {
+    transform: none;
+  }
+  .landing-cta:hover .landing-cta__arrow {
+    transform: none;
   }
   .eq i {
     animation: none;
@@ -332,5 +582,12 @@ a:focus-visible,
   }
   * {
     scroll-behavior: auto !important;
+  }
+}
+
+/* Touch and other coarse pointers keep the untouched artwork. */
+@media (hover: none), (pointer: coarse) {
+  .wave-cell__parallax {
+    transform: none;
   }
 }

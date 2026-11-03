@@ -16,11 +16,12 @@ export async function GET(
   }
 
   room.positionSeconds ??= 0;
+  room.playbackEpochServerTime ??= null;
   room.currentTrackId ??= room.queue[room.currentSongIndex]?.id ?? null;
 
   // Update lastActivity on room access
   room.lastActivity = Date.now();
   roomsStore.set(code, room);
 
-  return NextResponse.json(room);
+  return NextResponse.json({ ...room, syncV2Enabled: process.env.SYNC_V2 === "true" });
 }

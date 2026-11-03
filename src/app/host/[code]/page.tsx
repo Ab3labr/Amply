@@ -2,9 +2,9 @@
 
 import { HostPlayer } from "@/components/ui/HostPlayer";
 import { HostPlayerErrorBoundary } from "@/components/ui/HostPlayerErrorBoundary";
-import { RoomData } from "@/lib/store";
+import { RoomData, SyncV2Command } from "@/lib/store";
 import { diag, nextSeq } from "@/lib/sync-diag";
-import { startClockSync, stopClockSync } from "@/lib/clock-sync";
+import { getClockRtt, getClockUncertainty, getEstimatedServerTime, startClockSync, stopClockSync } from "@/lib/clock-sync";
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
@@ -15,10 +15,29 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
   const code = resolvedParams.code;
 
   const [roomState, setRoomState] = useState<RoomData | null>(null);
+  const [preparedCommand, setPreparedCommand] = useState<SyncV2Command | null>(null);
+  const [scheduledCommand, setScheduledCommand] = useState<SyncV2Command | null>(null);
+  const [outputOffsetMs, setOutputOffsetMs] = useState(0);
+  const [syncPositionErrorMs, setSyncPositionErrorMs] = useState<number | null>(null);
+  const [syncClockUncertaintyMs, setSyncClockUncertaintyMs] = useState(0);
+  const [roomQuality, setRoomQuality] = useState<Record<string, { errorMs: number; uncertaintyMs: number; sampledAt: number }>>({});
   const socketRef = useRef<Socket | null>(null);
   const prevIndexRef = useRef<number | null>(null);
   const roomStateRef = useRef<RoomData | null>(null);
+  const pendingV2Ref = useRef<SyncV2Command | null>(null);
+  const executionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const stored = Number(window.localStorage.getItem(`amply:sync-output-offset:${code}`));
+    if (Number.isFinite(stored)) setOutputOffsetMs(Math.max(-500, Math.min(500, stored)));
+  }, [code]);
+
+  const updateOutputOffset = (value: number) => {
+    const next = Math.max(-500, Math.min(500, Math.round(value / 5) * 5));
+    setOutputOffsetMs(next);
+    window.localStorage.setItem(`amply:sync-output-offset:${code}`, String(next));
+  };
 
   // Component mount/unmount logging
   useEffect(() => {
@@ -50,6 +69,57 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
       } catch (error) {
         console.error('[HOST SOCKET] Error in disconnect handler:', error);
       }
+    });
+
+    socket.on("SYNC_QUALITY", (sample: { clientId?: string; errorMs?: number; uncertaintyMs?: number; sampledAt?: number }) => {
+      if (!sample.clientId || !Number.isFinite(sample.errorMs) || !Number.isFinite(sample.uncertaintyMs)) return;
+      setRoomQuality((previous) => ({
+        ...previous,
+        [sample.clientId!]: {
+          errorMs: sample.errorMs!,
+          uncertaintyMs: sample.uncertaintyMs!,
+          sampledAt: sample.sampledAt ?? Date.now(),
+        },
+      }));
+    });
+
+    socket.on("PLAYBACK_PREPARE", (command: SyncV2Command) => {
+      if (command.roomCode !== code) return;
+      diag("HOST", code, "SYNC_V2", "prepare-receive", { requestId: command.requestId, revision: command.revision, trackId: command.trackId });
+      const current = roomStateRef.current;
+      if (current && command.revision < current.revision) return;
+      const next = { ...command.room, syncV2Enabled: true };
+      pendingV2Ref.current = command;
+      roomStateRef.current = next;
+      setRoomState(next);
+      setScheduledCommand(null);
+      setPreparedCommand(command);
+    });
+
+    socket.on("PLAYBACK_EXECUTE", (command: SyncV2Command) => {
+      if (command.roomCode !== code) return;
+      diag("HOST", code, "SYNC_V2", "execute-receive", { requestId: command.requestId, revision: command.revision, executeAtServerTime: command.executeAtServerTime });
+      const pending = pendingV2Ref.current;
+      if (pending && pending.requestId !== command.requestId) return;
+      const next = { ...command.room, syncV2Enabled: true };
+      pendingV2Ref.current = command;
+      roomStateRef.current = next;
+      setRoomState(next);
+      setPreparedCommand(null);
+      setScheduledCommand(command);
+      if (executionTimerRef.current) clearTimeout(executionTimerRef.current);
+      const remaining = Math.max(0, command.executeAtServerTime! - getEstimatedServerTime()) + 500;
+      executionTimerRef.current = setTimeout(() => {
+        if (pendingV2Ref.current?.requestId === command.requestId) pendingV2Ref.current = null;
+      }, remaining);
+    });
+
+    socket.on("PLAYBACK_CANCELLED", (command: { roomCode: string; requestId: string }) => {
+      if (command.roomCode !== code || pendingV2Ref.current?.requestId !== command.requestId) return;
+      diag("HOST", code, "SYNC_V2", "cancel-receive", { requestId: command.requestId });
+      pendingV2Ref.current = null;
+      setPreparedCommand(null);
+      setScheduledCommand(null);
     });
 
     socket.on("ROOM_SYNC", (payload: any) => {
@@ -92,8 +162,17 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
         console.error('[HOST PAGE] Error disconnecting socket:', error);
       }
       stopClockSync();
+      if (executionTimerRef.current) clearTimeout(executionTimerRef.current);
     };
   }, [code]);
+
+  const roomErrors = Object.values(roomQuality)
+    .filter((sample) => Date.now() - sample.sampledAt < 3000)
+    .map((sample) => Math.abs(sample.errorMs))
+    .sort((a, b) => a - b);
+  const roomP95ErrorMs = roomErrors.length
+    ? roomErrors[Math.max(0, Math.ceil(roomErrors.length * 0.95) - 1)]
+    : null;
 
   const emitPlay = (positionSeconds: number, revision: number, seq?: number) => {
     console.log('[HOST PAGE] emitPlay called');
@@ -170,6 +249,15 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
         });
         if (res.ok) {
           const data = await res.json();
+          if (data.syncV2Enabled === true && pendingV2Ref.current) {
+            const pendingRoom = roomStateRef.current;
+            data.currentSongIndex = pendingRoom?.currentSongIndex ?? data.currentSongIndex;
+            data.currentTrackId = pendingRoom?.currentTrackId ?? data.currentTrackId;
+            data.positionSeconds = pendingRoom?.positionSeconds ?? data.positionSeconds;
+            data.isPlaying = pendingRoom?.isPlaying ?? data.isPlaying;
+            data.revision = pendingRoom?.revision ?? data.revision;
+            data.playbackEpochServerTime = pendingRoom?.playbackEpochServerTime ?? data.playbackEpochServerTime;
+          }
           data.positionSeconds ??= 0;
           data.currentTrackId ??= data.queue[data.currentSongIndex]?.id ?? null;
           if (data.revision < (roomStateRef.current?.revision ?? -1)) return;
@@ -220,6 +308,28 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
         currentTrackId={roomState?.currentTrackId ?? null}
         positionSeconds={roomState?.positionSeconds ?? 0}
         isPlaying={roomState?.isPlaying ?? false}
+        playbackEpochServerTime={roomState?.playbackEpochServerTime ?? null}
+        syncV2={roomState?.syncV2Enabled ?? false}
+        preparedCommand={preparedCommand}
+        scheduledCommand={scheduledCommand}
+        onPlaybackPrepared={(requestId, revision) => {
+          diag("HOST", code, "SYNC_V2", "ready-emit", { requestId, revision });
+          socketRef.current?.emit("PLAYBACK_READY", {
+            roomCode: code,
+            requestId,
+            revision,
+            rttMs: getClockRtt(),
+          });
+        }}
+        outputOffsetMs={outputOffsetMs}
+        onOutputOffsetChange={updateOutputOffset}
+        syncClockUncertaintyMs={syncClockUncertaintyMs}
+        roomP95ErrorMs={roomP95ErrorMs}
+        onSyncQuality={(errorMs, uncertaintyMs) => {
+          setSyncPositionErrorMs((previous) => previous === null || Math.abs(previous - errorMs) >= 5 ? errorMs : previous);
+          setSyncClockUncertaintyMs(uncertaintyMs);
+          socketRef.current?.emit("SYNC_QUALITY", { roomCode: code, errorMs, uncertaintyMs });
+        }}
         members={roomState?.members || []}
         hostName={roomState?.hostName}
         loading={!roomState}

@@ -13,6 +13,7 @@ import { TrackThumbnail } from "@/components/ui/TrackThumbnail";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Toast } from "@/components/ui/Toast";
 import { Participant } from "@/components/ui/ParticipantItem";
+import { SyncStatusPanel } from "@/components/ui/SyncStatusPanel";
 
 interface RoomScreenProps {
   variant: "host" | "guest";
@@ -31,6 +32,14 @@ interface RoomScreenProps {
   onPrev?: () => void;
   onNext?: () => void;
   onSeek?: (fraction: number) => void;
+  syncV2?: boolean;
+  syncPositionErrorMs?: number | null;
+  syncClockUncertaintyMs?: number;
+  roomP95ErrorMs?: number | null;
+  outputOffsetMs?: number;
+  onOutputOffsetChange?: (offsetMs: number) => void;
+  showTapToJoin?: boolean;
+  onEnableAudio?: () => void;
 }
 
 export function RoomScreen({
@@ -49,6 +58,14 @@ export function RoomScreen({
   onPrev,
   onNext,
   onSeek,
+  syncV2 = false,
+  syncPositionErrorMs = null,
+  syncClockUncertaintyMs = 0,
+  roomP95ErrorMs = null,
+  outputOffsetMs = 0,
+  onOutputOffsetChange,
+  showTapToJoin = false,
+  onEnableAudio,
 }: RoomScreenProps) {
   const [queueExpanded, setQueueExpanded] = useState(false);
   const currentSong = queue[currentSongIndex] ?? null;
@@ -200,6 +217,26 @@ export function RoomScreen({
               onPlayPause={onPlayPause}
               onPrev={onPrev}
               onNext={onNext}
+            />
+
+            {showTapToJoin ? (
+              <button
+                type="button"
+                onClick={onEnableAudio}
+                className="mx-auto mt-3 flex min-h-10 items-center justify-center border border-accent px-4 font-mono text-[11px] uppercase text-primary hover:bg-accent/10"
+              >
+                Tap to join audio
+              </button>
+            ) : null}
+
+            <SyncStatusPanel
+              code={code}
+              enabled={syncV2}
+              positionErrorMs={syncPositionErrorMs}
+              clockUncertaintyMs={syncClockUncertaintyMs}
+              roomP95ErrorMs={roomP95ErrorMs}
+              outputOffsetMs={outputOffsetMs}
+              onOutputOffsetChange={onOutputOffsetChange ?? (() => {})}
             />
 
             {!isHost ? (

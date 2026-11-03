@@ -2,10 +2,13 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { QueueItem } from "@/lib/store";
+import type { SyncV2Command } from "@/lib/store";
 import { getYouTubeVideoId } from "@/lib/youtube";
 import { RoomScreen } from "@/components/ui/RoomScreen";
 import { Participant } from "@/components/ui/ParticipantItem";
 import { diag } from "@/lib/sync-diag";
+import { getClockUncertainty, getEstimatedServerTime, hasClockEstimate } from "@/lib/clock-sync";
+import { useSyncV2Playback } from "@/components/ui/useSyncV2Playback";
 
 declare global {
   interface Window {
@@ -51,6 +54,16 @@ interface GuestPlayerProps {
   revision: number;
   currentTrackId: string | null;
   socketCommand?: SocketCommand | null;
+  playbackEpochServerTime?: number | null;
+  syncV2?: boolean;
+  preparedCommand?: SyncV2Command | null;
+  scheduledCommand?: SyncV2Command | null;
+  onPlaybackPrepared?: (requestId: string, revision: number) => void;
+  outputOffsetMs?: number;
+  onSyncQuality?: (errorMs: number, uncertaintyMs: number) => void;
+  syncClockUncertaintyMs?: number;
+  roomP95ErrorMs?: number | null;
+  onOutputOffsetChange?: (offsetMs: number) => void;
   hostName?: string;
   members?: Participant[];
   loading?: boolean;
@@ -66,6 +79,16 @@ export function GuestPlayer({
   revision,
   currentTrackId,
   socketCommand,
+  playbackEpochServerTime = null,
+  syncV2 = false,
+  preparedCommand = null,
+  scheduledCommand = null,
+  onPlaybackPrepared,
+  outputOffsetMs = 0,
+  onSyncQuality,
+  syncClockUncertaintyMs = 0,
+  roomP95ErrorMs = null,
+  onOutputOffsetChange,
   hostName,
   members = [],
   loading = false,
@@ -78,6 +101,18 @@ export function GuestPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [playerInstanceReady, setPlayerInstanceReady] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const preparedCommandRef = useRef<SyncV2Command | null>(preparedCommand);
+  const preparedNotifiedRef = useRef<string | null>(null);
+  const lastReadinessDiagnosticRef = useRef("");
+  const queueRef = useRef(queue);
+  const onPlaybackPreparedRef = useRef(onPlaybackPrepared);
+  const notifyPlaybackPreparedRef = useRef<(() => void) | null>(null);
+  const syncV2Ref = useRef(syncV2);
+  queueRef.current = queue;
+  onPlaybackPreparedRef.current = onPlaybackPrepared;
+  syncV2Ref.current = syncV2;
+  preparedCommandRef.current = preparedCommand;
 
   // Generation counter: a replaced player's late callbacks (onReady/onError)
   // must never re-arm the ready flag with a stale/dead instance.
@@ -95,6 +130,21 @@ export function GuestPlayer({
   });
   const applyPlaybackRef = useRef<((force?: boolean) => void) | null>(null);
 
+  const syncPositionErrorMs = useSyncV2Playback({
+    enabled: syncV2,
+    roomCode,
+    playerRef,
+    playerReady: playerInstanceReady,
+    isBuffering,
+    isPlaying,
+    positionSeconds,
+    playbackEpochServerTime,
+    scheduledCommand,
+    preparing: Boolean(preparedCommand),
+    outputOffsetMs,
+    onQuality: onSyncQuality,
+  });
+
   // Pre-cue player: hidden second player that pre-loads the next song
   const preCuePlayerRef = useRef<any>(null);
   const preCueContainerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +154,47 @@ export function GuestPlayer({
 
   const currentSong = queue[currentSongIndex];
   const [displayedTrackId, setDisplayedTrackId] = useState(currentSong?.id);
+
+  const notifyPlaybackPrepared = () => {
+    const command = preparedCommandRef.current;
+    const player = playerRef.current;
+    if (!syncV2 || !command || !playerInstanceReady || !player) {
+      const key = `${syncV2}:${command?.requestId ?? "none"}:${playerInstanceReady}:${Boolean(player)}`;
+      if (key !== lastReadinessDiagnosticRef.current) {
+        lastReadinessDiagnosticRef.current = key;
+        diag("GUEST", roomCode, "SYNC_V2", "readiness-check", { syncV2, requestId: command?.requestId ?? null, playerInstanceReady, hasPlayer: Boolean(player) });
+      }
+      return;
+    }
+    if (preparedNotifiedRef.current === command.requestId) return;
+    let videoId = "";
+    let state = -1;
+    try {
+      videoId = player.getVideoData?.()?.video_id ?? "";
+      state = player.getPlayerState?.() ?? -1;
+    } catch {}
+    const targetVideoId = getYouTubeVideoId(queueRef.current[command.songIndex]?.url || "");
+    const key = `${command.requestId}:${videoId}:${targetVideoId}:${state}`;
+    if (key !== lastReadinessDiagnosticRef.current) {
+      lastReadinessDiagnosticRef.current = key;
+      diag("GUEST", roomCode, "SYNC_V2", "readiness-check", { requestId: command.requestId, videoId, targetVideoId, state });
+    }
+    if (videoId !== targetVideoId || state === -1 || state === 3) return;
+    preparedNotifiedRef.current = command.requestId;
+    onPlaybackPreparedRef.current?.(command.requestId, command.revision);
+  };
+  notifyPlaybackPreparedRef.current = notifyPlaybackPrepared;
+
+  useEffect(() => {
+    preparedNotifiedRef.current = null;
+    notifyPlaybackPrepared();
+  }, [preparedCommand, playerInstanceReady, currentSongIndex, currentTrackId]);
+
+  useEffect(() => {
+    if (!syncV2 || !preparedCommand) return;
+    const interval = setInterval(notifyPlaybackPrepared, 100);
+    return () => clearInterval(interval);
+  }, [syncV2, preparedCommand, playerInstanceReady, currentSongIndex, currentTrackId]);
 
   if (displayedTrackId !== currentSong?.id) {
     setDisplayedTrackId(currentSong?.id);
@@ -247,7 +338,7 @@ export function GuestPlayer({
             setDuration(readyDuration);
           }
 
-          applyPlaybackRef.current?.(true);
+          if (!syncV2) applyPlaybackRef.current?.(true);
         },
         onStateChange: (event: any) => {
           if (playerGenerationRef.current !== generation) return;
@@ -272,6 +363,8 @@ export function GuestPlayer({
             diag("GUEST", roomCode, "ENDED", "yt-ended", { index: currentSongIndex });
           } else if (event.data === window.YT.PlayerState.PLAYING) {
             setIsBuffering(false);
+            setAutoplayBlocked(false);
+            if (syncV2Ref.current) notifyPlaybackPreparedRef.current?.();
             const playingAt = performance.now();
             diag("GUEST", roomCode, "PLAY", "yt-playing", { t: playingAt.toFixed(2) });
             setTimeout(() => {
@@ -285,6 +378,7 @@ export function GuestPlayer({
           } else if (event.data === window.YT.PlayerState.PAUSED) {
             setIsBuffering(false);
             syncVisualPosition();
+            if (syncV2Ref.current) notifyPlaybackPreparedRef.current?.();
             diag("GUEST", roomCode, "PAUSE", "yt-paused", {});
           } else if (event.data === window.YT.PlayerState.BUFFERING) {
             setIsBuffering(true);
@@ -295,13 +389,17 @@ export function GuestPlayer({
             if (cuedVideoId && cuedVideoId !== desiredPlaybackRef.current.videoId) return;
             setIsBuffering(false);
             waitingForCueRef.current = false;
-            applyPlaybackRef.current?.(true);
+            if (syncV2Ref.current) notifyPlaybackPreparedRef.current?.();
+            else applyPlaybackRef.current?.(true);
             diag("GUEST", roomCode, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
           }
         },
         onError: (event: any) => {
           if (playerGenerationRef.current !== generation) return;
           console.debug('YouTube error:', event.data);
+        },
+        onAutoplayBlocked: () => {
+          if (playerGenerationRef.current === generation) setAutoplayBlocked(true);
         },
       },
     });
@@ -420,6 +518,44 @@ export function GuestPlayer({
     if (!playerRef.current || !playerInstanceReady || revision < 0) return;
     if (revision < appliedRevisionRef.current) return;
 
+    if (syncV2) {
+      const targetTrackId = currentTrackId ?? currentSong?.id ?? null;
+      const targetVideoId = getYouTubeVideoId(currentSong?.url || "");
+      if (!targetTrackId || !targetVideoId) return;
+      if (loadedTrackRef.current !== targetTrackId) {
+        const canSwapPreCue =
+          preCueReadyRef.current &&
+          preCueVideoIdRef.current === targetVideoId &&
+          preCuePlayerRef.current;
+        if (canSwapPreCue) {
+          const oldPrimary = playerRef.current;
+          try { oldPrimary.pauseVideo(); } catch {}
+          try { oldPrimary.mute(); } catch {}
+          try { preCuePlayerRef.current.pauseVideo(); } catch {}
+          try { preCuePlayerRef.current.unMute(); } catch {}
+          playerRef.current = preCuePlayerRef.current;
+          preCuePlayerRef.current = null;
+          preCueReadyRef.current = false;
+          preCueVideoIdRef.current = null;
+          try { oldPrimary.destroy(); } catch {}
+          loadedTrackRef.current = targetTrackId;
+          prevVideoIdRef.current = targetVideoId;
+          try { playerRef.current.seekTo(positionSeconds, true); } catch {}
+          notifyPlaybackPrepared();
+        } else {
+          loadedTrackRef.current = targetTrackId;
+          prevVideoIdRef.current = targetVideoId;
+          waitingForCueRef.current = true;
+          try {
+            playerRef.current.cueVideoById({ videoId: targetVideoId, startSeconds: positionSeconds });
+          } catch {}
+        }
+      } else {
+        notifyPlaybackPrepared();
+      }
+      return;
+    }
+
     const force = Boolean(socketCommand && socketCommand.revision === revision);
     diag("PLAYER", roomCode, isPlaying ? "play" : "pause", "authoritative-update", {
       revision,
@@ -437,6 +573,7 @@ export function GuestPlayer({
     socketCommand,
     playerInstanceReady,
     roomCode,
+    syncV2,
     applyAuthoritativePlayback,
   ]);
 
@@ -474,6 +611,26 @@ export function GuestPlayer({
         hostName={hostName}
         members={members}
         loading={loading}
+        syncV2={syncV2}
+        syncPositionErrorMs={syncPositionErrorMs}
+        syncClockUncertaintyMs={syncClockUncertaintyMs}
+        roomP95ErrorMs={roomP95ErrorMs}
+        outputOffsetMs={outputOffsetMs}
+        onOutputOffsetChange={onOutputOffsetChange}
+        showTapToJoin={syncV2 && autoplayBlocked}
+        onEnableAudio={() => {
+          const player = playerRef.current;
+          if (!player) return;
+          try {
+            const serverNow = hasClockEstimate() ? getEstimatedServerTime() : Date.now();
+            const target = Math.max(0, positionSeconds + (isPlaying && playbackEpochServerTime
+              ? (serverNow - playbackEpochServerTime) / 1000
+              : 0) + outputOffsetMs / 1000);
+            player.seekTo(target, true);
+            player.playVideo();
+            setAutoplayBlocked(false);
+          } catch {}
+        }}
         onLeave={() => onLeave?.()}
       />
     </>

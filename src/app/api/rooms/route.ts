@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       isPlaying: false,
       progress: 0,
       positionSeconds: 0,
+      playbackEpochServerTime: null,
       createdAt: now,
       lastActivity: now,
       revision: 0,

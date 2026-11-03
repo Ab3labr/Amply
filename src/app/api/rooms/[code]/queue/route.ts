@@ -7,7 +7,7 @@ import {
   isValidYouTubeVideoId,
 } from "@/lib/youtube";
 import { cleanChannelTitle, cleanText, formatDuration } from "@/lib/youtube-search";
-import { emitPlaybackCommand, emitQueueUpdate } from "@/lib/socket-server";
+import { emitPlaybackCommand, emitQueueUpdate, emitScheduledPlayback } from "@/lib/socket-server";
 
 type Params = Promise<{ code: string }>;
 
@@ -149,6 +149,7 @@ export async function POST(
       room.currentSongIndex = targetIndex;
       room.currentTrackId = nextTrackId;
       room.isPlaying = true;
+      room.playbackEpochServerTime = null;
       if (trackChanged) {
         room.positionSeconds = 0;
         room.progress = 0;
@@ -171,7 +172,10 @@ export async function POST(
     });
 
     if (shouldStartPlayback) {
-      emitPlaybackCommand(code, {
+      if (process.env.SYNC_V2 === "true") {
+        emitScheduledPlayback(code, playNow ? "play" : "update", null);
+      } else {
+        emitPlaybackCommand(code, {
         roomCode: code,
         type: playNow ? "play" : "update",
         revision: room.revision,
@@ -182,7 +186,8 @@ export async function POST(
         isPlaying: room.isPlaying,
         serverSentAt: Date.now(),
         seq: null,
-      });
+        });
+      }
     }
 
     return NextResponse.json({

@@ -54,6 +54,7 @@ export async function POST(
 
     room.currentTrackId = currentTrackId;
     room.revision += 1;
+    if (process.env.SYNC_V2 === "true" && action) room.playbackEpochServerTime = null;
 
     room.lastActivity = Date.now();
     roomsStore.set(code, room);

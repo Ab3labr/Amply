@@ -1,6 +1,10 @@
 import type { Server } from "socket.io";
+import { diag } from "@/lib/sync-diag";
 
 type GlobalWithSocketServer = typeof globalThis & { io?: Server };
+type GlobalWithPlaybackScheduler = typeof globalThis & {
+  schedulePlaybackV2?: (roomCode: string, action?: string, seq?: number | null) => void;
+};
 
 function getSocketServer(): Server | undefined {
   return (globalThis as GlobalWithSocketServer).io;
@@ -27,4 +31,18 @@ export function emitPlaybackCommand(roomCode: string, payload: Record<string, un
   const io = getSocketServer();
   if (!io || !roomCode) return;
   io.to(roomCode).emit("PLAYBACK_COMMAND", payload);
+}
+
+export function emitScheduledPlayback(
+  roomCode: string,
+  action = "update",
+  seq: number | null = null
+): void {
+  const scheduler = (globalThis as GlobalWithPlaybackScheduler).schedulePlaybackV2;
+  diag("SERVER", roomCode, "SYNC_V2", "route-schedule-request", {
+    action,
+    seq,
+    available: Boolean(scheduler),
+  });
+  scheduler?.(roomCode, action, seq);
 }

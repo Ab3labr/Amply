@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amply Sync Measurement Harness</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; background: #f7f3e7; color: #080808; }
+    body { margin: 0; padding: 22px; }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { margin: 0 0 12px; font-size: 24px; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .meta span { padding: 8px 10px; border: 1px solid #d5cfbf; background: #fbf8f0; font: 12px monospace; overflow-wrap: anywhere; }
+    #player { width: min(100%, 640px); aspect-ratio: 16 / 9; background: #080808; }
+    iframe { width: 100%; height: 100%; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+    button { border: 1px solid #080808; background: #080808; color: #f7f3e7; padding: 10px 12px; font: inherit; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
+    pre { min-height: 120px; max-height: 220px; overflow: auto; padding: 12px; background: #080808; color: #b7e0b2; font: 11px/1.5 monospace; white-space: pre-wrap; }
+    .warning { font-size: 13px; line-height: 1.5; color: #8c2c24; }
+  </style>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<main>
+  <h1>Amply Sync Measurement Harness</h1>
+  <div class="meta">
+    <span id="room"></span><span id="role"></span><span id="client"></span><span id="state">Connecting</span>
+  </div>
+  <div id="player"></div>
+  <div class="controls">
+    <button id="start" disabled>Start 3-minute run</button>
+    <button id="seek" disabled>Seek</button>
+    <button id="pause" disabled>Pause</button>
+    <button id="resume" disabled>Resume</button>
+    <button id="next" disabled>Change track</button>
+    <button id="reconnect" disabled>Reconnect socket</button>
+  </div>
+  <p class="warning">Measurement uses the real YouTube IFrame API. Browser autoplay flags allow the automated harness to start; manual clients must press Start. Server logs are enabled only with SYNC_MEASUREMENTS=true.</p>
+  <pre id="log"></pre>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const roomCode = (params.get('room') || '').toUpperCase();
+  const role = params.get('role') || 'guest';
+  const clientId = params.get('client') || `${role}-${Math.random().toString(36).slice(2, 8)}`;
+  const runId = params.get('run') || `manual-${Date.now()}`;
+  const firstVideoId = params.get('video') || 'M7lc1UVf-VE';
+  const secondVideoId = params.get('next') || 'aqz-KE-bpKQ';
+  const logNode = document.getElementById('log');
+  const stateNode = document.getElementById('state');
+  const controls = [...document.querySelectorAll('button')];
+  const samples = [];
+  let socket;
+  let player;
+  let clockOffsetMs = 0;
+  let clockRttMs = 0;
+  let clockReady = false;
+  let active = false;
+  let sampleTimer = null;
+  let scenarioTimers = [];
+  let timeline = { playing: false, positionSeconds: 0, serverAnchorTime: 0, trackId: firstVideoId };
+  let pendingCue = null;
+  let seq = 0;
+
+  document.getElementById('room').textContent = `room ${roomCode || 'missing'}`;
+  document.getElementById('role').textContent = `role ${role}`;
+  document.getElementById('client').textContent = `client ${clientId}`;
+
+  function write(message, data) {
+    logNode.textContent += `${new Date().toISOString()} ${message}${data ? ` ${JSON.stringify(data)}` : ''}\n`;
+    logNode.scrollTop = logNode.scrollHeight;
+  }
+
+  function serverNow() { return performance.now() + clockOffsetMs; }
+
+  function estimateClock() {
+    const observations = [];
+    let index = 0;
+    const sample = () => new Promise((resolve) => {
+      const t0 = performance.now();
+      socket.emit('CLOCK_SYNC', { roomCode, sample: ++index }, (reply) => {
+        const t3 = performance.now();
+        if (reply && Number.isFinite(reply.t1) && Number.isFinite(reply.t2)) {
+          observations.push({ rtt: t3 - t0, offset: (reply.t1 + reply.t2 - t0 - t3) / 2 });
+        }
+        resolve();
+      });
+      setTimeout(resolve, 2000);
+    });
+
+    (async () => {
+      for (let count = 0; count < 6; count += 1) {
+        await sample();
+        if (count < 5) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      observations.sort((a, b) => a.rtt - b.rtt);
+      if (observations.length) {
+        clockOffsetMs = observations[0].offset;
+        clockRttMs = observations[0].rtt;
+        clockReady = true;
+      }
+      updateReady();
+      write('clock estimate', { clockOffsetMs, clockRttMs, validSamples: observations.length });
+    })();
+  }
+
+  function updateReady() {
+    const ready = Boolean(socket?.connected && player && playerReady && clockReady);
+    controls.forEach((button) => { button.disabled = !ready; });
+    stateNode.textContent = ready ? `Ready; YT ${player.getPlayerState()}` : 'Preparing player/clock/socket';
+  }
+
+  let playerReady = false;
+  function expectedPosition(atServerTime = serverNow()) {
+    if (!timeline.playing) return timeline.positionSeconds;
+    return timeline.positionSeconds + Math.max(0, (atServerTime - timeline.serverAnchorTime) / 1000);
+  }
+
+  function beginSampling() {
+    if (active) return;
+    active = true;
+    sampleTimer = setInterval(() => {
+      if (!player || !socket?.connected || !clockReady) return;
+      const serverTime = serverNow();
+      const expected = expectedPosition(serverTime);
+      let playerTime = NaN;
+      let playerState = -1;
+      try {
+        playerTime = player.getCurrentTime();
+        playerState = player.getPlayerState();
+      } catch {}
+      if (!Number.isFinite(playerTime)) return;
+      const measurement = {
+        roomCode, runId, clientId, role, serverTime,
+        expectedPosition: expected,
+        playerTime,
+        playerState,
+        trackId: timeline.trackId,
+        clockOffsetMs,
+        clockRttMs,
+      };
+      samples.push(measurement);
+      socket.emit('SYNC_MEASUREMENT', measurement);
+    }, 500);
+  }
+
+  function startScenario() {
+    beginSampling();
+    const startCommand = { action: 'play', positionSeconds: player.getCurrentTime() || 0, serverTime: serverNow(), trackId: timeline.trackId };
+    applyCommand(startCommand);
+    broadcastCommand(startCommand);
+    scenarioTimers.push(setTimeout(() => sendAction('seek', { positionSeconds: 30 }), 45_000));
+    scenarioTimers.push(setTimeout(() => sendAction('pause'), 75_000));
+    scenarioTimers.push(setTimeout(() => sendAction('resume'), 85_000));
+    scenarioTimers.push(setTimeout(() => sendAction('next', { trackId: secondVideoId }), 120_000));
+    if (clientId === 'guest-2') {
+      scenarioTimers.push(setTimeout(() => reconnectSocket(), 150_000));
+    }
+    scenarioTimers.push(setTimeout(() => stopSampling(), 180_000));
+  }
+
+  function sendAction(action, extra = {}) {
+    if (role !== 'host' || !player) return;
+    let positionSeconds = player.getCurrentTime() || timeline.positionSeconds;
+    if (action === 'seek') positionSeconds = extra.positionSeconds;
+    if (action === 'next') positionSeconds = 0;
+    const command = {
+      action,
+      positionSeconds,
+      trackId: extra.trackId || timeline.trackId,
+      serverTime: serverNow(),
+      seq: ++seq,
+    };
+    applyCommand(command);
+    broadcastCommand(command);
+    write(`host ${action}`, command);
+  }
+
+  function broadcastCommand(command) {
+    socket.emit('ROOM_SYNC', { roomCode, timestamp: Date.now(), message: JSON.stringify({ kind: 'command', command }) });
+  }
+
+  function applyCommand(command) {
+    if (!player) return;
+    const changedTrack = command.trackId && command.trackId !== timeline.trackId;
+    const wasPlaying = timeline.playing;
+    timeline.trackId = command.trackId || timeline.trackId;
+    timeline.positionSeconds = Math.max(0, command.positionSeconds || 0);
+    timeline.serverAnchorTime = command.serverTime || serverNow();
+    timeline.playing = command.action === 'pause' ? false : command.action === 'play' || command.action === 'resume' || command.action === 'next' ? true : wasPlaying;
+
+    if (changedTrack) {
+      pendingCue = { play: timeline.playing, positionSeconds: timeline.positionSeconds, trackId: timeline.trackId };
+      if (role === 'host') player.loadVideoById({ videoId: timeline.trackId, startSeconds: timeline.positionSeconds });
+      else player.cueVideoById({ videoId: timeline.trackId, startSeconds: timeline.positionSeconds });
+      return;
+    }
+
+    if (command.action === 'pause') player.pauseVideo();
+    else {
+      player.seekTo(timeline.positionSeconds, true);
+      player.playVideo();
+    }
+  }
+
+  function stopSampling() {
+    active = false;
+    if (sampleTimer) clearInterval(sampleTimer);
+    sampleTimer = null;
+    scenarioTimers.forEach(clearTimeout);
+    scenarioTimers = [];
+    stateNode.textContent = `Complete; ${samples.length} samples`;
+    write('sampling complete', { samples: samples.length });
+  }
+
+  function reconnectSocket() {
+    if (!socket) return;
+    socket.disconnect();
+    setTimeout(() => socket.connect(), 1000);
+  }
+
+  function handleRoomMessage(payload) {
+    let data;
+    try { data = JSON.parse(payload.message); } catch { return; }
+    if (data.kind === 'command') applyCommand(data.command);
+    if (data.kind === 'start-run' && role !== 'host') {
+      beginSampling();
+      scenarioTimers.push(setTimeout(() => {
+        if (clientId === 'guest-2') reconnectSocket();
+      }, 150_000));
+      scenarioTimers.push(setTimeout(stopSampling, 180_000));
+    }
+    if (data.kind === 'snapshot-request' && role === 'host') {
+      socket.emit('ROOM_SYNC', { roomCode, timestamp: Date.now(), message: JSON.stringify({ kind: 'snapshot', timeline }) });
+    }
+    if (data.kind === 'snapshot') {
+      const currentPosition = expectedPosition();
+      timeline = data.timeline;
+      if (timeline.trackId && player.getVideoData().video_id !== timeline.trackId) {
+        pendingCue = { play: timeline.playing, positionSeconds: currentPosition, trackId: timeline.trackId };
+        player.cueVideoById({ videoId: timeline.trackId, startSeconds: pendingCue.positionSeconds });
+      } else {
+        applyCommand({ ...timeline, positionSeconds: currentPosition, action: timeline.playing ? 'resume' : 'pause', serverTime: serverNow() });
+      }
+    }
+  }
+
+  window.__syncHarness = {
+    get ready() { return Boolean(playerReady && socket?.connected && clockReady && player?.getPlayerState() === 5); },
+    get samples() { return samples; },
+    get status() { return { role, clientId, playerState: player?.getPlayerState(), playerTime: player?.getCurrentTime(), clockOffsetMs, clockRttMs, clockReady }; },
+    startScenario,
+    sendAction,
+    stopSampling,
+    reconnectSocket,
+    async samplePrecision(seconds = 5, intervalMs = 50) {
+      const values = [];
+      const end = performance.now() + seconds * 1000;
+      while (performance.now() < end) {
+        values.push(player.getCurrentTime());
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      return values;
+    },
+  };
+
+  socket = io({ path: '/socket.io' });
+  socket.on('connect', () => {
+    socket.emit('JOIN_ROOM', { roomCode, role });
+    estimateClock();
+    write('socket connected', { id: socket.id });
+    if (clientId !== 'host' && active) socket.emit('ROOM_SYNC', { roomCode, timestamp: Date.now(), message: JSON.stringify({ kind: 'snapshot-request', clientId }) });
+  });
+  socket.on('ROOM_SYNC', handleRoomMessage);
+  socket.on('disconnect', () => write('socket disconnected'));
+
+  document.getElementById('start').addEventListener('click', () => {
+    if (role !== 'host') return;
+    beginSampling();
+    socket.emit('ROOM_SYNC', { roomCode, timestamp: Date.now(), message: JSON.stringify({ kind: 'start-run' }) });
+    setTimeout(startScenario, 100);
+  });
+  document.getElementById('seek').addEventListener('click', () => sendAction('seek', { positionSeconds: Math.max(0, player.getCurrentTime() + 10) }));
+  document.getElementById('pause').addEventListener('click', () => sendAction('pause'));
+  document.getElementById('resume').addEventListener('click', () => sendAction('resume'));
+  document.getElementById('next').addEventListener('click', () => sendAction('next', { trackId: secondVideoId }));
+  document.getElementById('reconnect').addEventListener('click', reconnectSocket);
+
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(script);
+  window.onYouTubeIframeAPIReady = () => {
+    player = new YT.Player('player', {
+      width: 640,
+      height: 360,
+      videoId: firstVideoId,
+      playerVars: { autoplay: 0, controls: 1, playsinline: 1, origin: location.origin, enablejsapi: 1 },
+      events: {
+        onReady: (event) => {
+          playerReady = true;
+          event.target.cueVideoById(firstVideoId);
+          updateReady();
+        },
+        onStateChange: (event) => {
+          if (event.data === YT.PlayerState.CUED) {
+            if (pendingCue && player.getVideoData().video_id === pendingCue.trackId) {
+              const next = pendingCue;
+              pendingCue = null;
+              player.seekTo(next.positionSeconds, true);
+              if (next.play) player.playVideo();
+            }
+            updateReady();
+          }
+          stateNode.textContent = `${playerReady ? 'Player ready' : 'Loading'}; YT state ${event.data}; ${clockReady ? 'clock ready' : 'clock sampling'}`;
+        },
+        onError: (event) => {
+          stateNode.textContent = `YouTube IFrame error ${event.data}`;
+          write('YouTube IFrame error', { code: event.data });
+        },
+        onAutoplayBlocked: () => write('YouTube reported autoplay blocked'),
+      },
+    });
+  };
+})();
+</script>
+</body>
+</html>

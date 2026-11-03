@@ -25,10 +25,29 @@ export interface RoomData {
   isPlaying: boolean;
   progress: number;
   positionSeconds: number;
+  playbackEpochServerTime?: number | null;
   createdAt: number;
   lastActivity: number;
   /** Monotonically increasing revision for playback-affecting commands. */
   revision: number;
+  syncV2Enabled?: boolean;
+}
+
+export interface SyncV2Command {
+  roomCode: string;
+  requestId: string;
+  type: string;
+  revision: number;
+  songIndex: number;
+  trackId: string | null;
+  positionSeconds: number;
+  progress: number;
+  isPlaying: boolean;
+  seq: number | null;
+  serverPreparedAt: number;
+  executeAtServerTime?: number;
+  room: RoomData;
+  readiness?: { expected: number; ready: number; missing: number };
 }
 
 const globalForStore = global as unknown as {

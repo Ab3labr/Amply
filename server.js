@@ -8,6 +8,7 @@ const { diag } = require('./sync-diag');
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
+const syncV2Enabled = process.env.SYNC_V2 === 'true';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
@@ -47,6 +48,126 @@ app.prepare().then(() => {
   // queue changes (QUEUE_UPDATE / PLAYBACK_COMMAND) to room participants.
   global.io = io;
 
+  const pendingV2Schedules = new Map();
+  const finishV2Schedule = (schedule) => {
+    if (pendingV2Schedules.get(schedule.roomCode) !== schedule) return;
+    pendingV2Schedules.delete(schedule.roomCode);
+    clearTimeout(schedule.timeout);
+
+    const room = roomsStore.get(schedule.roomCode);
+    if (!room || room.revision !== schedule.revision) {
+      io.to(schedule.roomCode).emit('PLAYBACK_CANCELLED', {
+        roomCode: schedule.roomCode,
+        requestId: schedule.requestId,
+        revision: room?.revision ?? -1,
+      });
+      return;
+    }
+
+    const maximumReadyRttMs = Math.max(0, ...schedule.readyRtts);
+    const leadMs = Math.max(500, Math.min(3000, maximumReadyRttMs * 2 + 250));
+    const executeAtServerTime = Date.now() + leadMs;
+    if (schedule.command.type === 'resync' && room.isPlaying && Number.isFinite(room.playbackEpochServerTime)) {
+      room.positionSeconds = Math.max(
+        0,
+        room.positionSeconds + Math.max(0, executeAtServerTime - room.playbackEpochServerTime) / 1000,
+      );
+      schedule.command.positionSeconds = room.positionSeconds;
+    }
+    room.playbackEpochServerTime = room.isPlaying ? executeAtServerTime : null;
+    room.lastActivity = Date.now();
+    roomsStore.set(schedule.roomCode, room);
+
+    io.to(schedule.roomCode).emit('PLAYBACK_EXECUTE', {
+      ...schedule.command,
+      room: JSON.parse(JSON.stringify(room)),
+      executeAtServerTime,
+      readiness: {
+        expected: schedule.targetSocketIds.length,
+        ready: schedule.readySocketIds.size,
+        missing: schedule.targetSocketIds.length - schedule.readySocketIds.size,
+      },
+    });
+    diag('SERVER', schedule.roomCode, 'SYNC_V2', 'execute-scheduled', {
+      revision: room.revision,
+      executeAtServerTime,
+      leadMs,
+      ready: schedule.readySocketIds.size,
+      expected: schedule.targetSocketIds.length,
+    });
+  };
+
+  const scheduleV2Playback = (roomCode, action = 'update', seq = null) => {
+    if (!syncV2Enabled || !roomCode) return;
+    const room = roomsStore.get(roomCode);
+    if (!room) return;
+
+    const previous = pendingV2Schedules.get(roomCode);
+    if (previous) {
+      clearTimeout(previous.timeout);
+      io.to(roomCode).emit('PLAYBACK_CANCELLED', {
+        roomCode,
+        requestId: previous.requestId,
+        revision: room.revision,
+      });
+      pendingV2Schedules.delete(roomCode);
+    }
+
+    const targetSocketIds = [...(io.sockets.adapter.rooms.get(roomCode) ?? [])];
+    const command = {
+      roomCode,
+      requestId: `${roomCode}-${room.revision}-${Date.now()}`,
+      type: action,
+      revision: room.revision,
+      songIndex: room.currentSongIndex,
+      trackId: room.currentTrackId ?? room.queue[room.currentSongIndex]?.id ?? null,
+      positionSeconds: room.positionSeconds ?? 0,
+      progress: room.progress,
+      isPlaying: room.isPlaying,
+      seq,
+      serverPreparedAt: Date.now(),
+    };
+    const schedule = {
+      roomCode,
+      requestId: command.requestId,
+      revision: room.revision,
+      command,
+      targetSocketIds,
+      readySocketIds: new Set(),
+      readyRtts: [],
+      timeout: null,
+    };
+    pendingV2Schedules.set(roomCode, schedule);
+    diag('SERVER', roomCode, 'SYNC_V2', 'prepare', {
+      requestId: command.requestId,
+      action,
+      revision: room.revision,
+      targets: targetSocketIds.length,
+      socketIds: targetSocketIds,
+    });
+
+    if (targetSocketIds.length === 0) {
+      finishV2Schedule(schedule);
+      return;
+    }
+
+    io.to(roomCode).emit('PLAYBACK_PREPARE', {
+      ...command,
+      room: JSON.parse(JSON.stringify(room)),
+    });
+    schedule.timeout = setTimeout(() => {
+      diag('SERVER', roomCode, 'SYNC_V2', 'readiness-timeout', {
+        requestId: command.requestId,
+        ready: schedule.readySocketIds.size,
+        expected: schedule.targetSocketIds.length,
+      });
+      finishV2Schedule(schedule);
+    }, 8000);
+  };
+
+  global.schedulePlaybackV2 = scheduleV2Playback;
+  log(`SYNC_V2 ${syncV2Enabled ? 'enabled' : 'disabled'}`);
+
   io.on('connection', (socket) => {
     log(`Client connected: ${socket.id}`);
 
@@ -70,8 +191,41 @@ app.prepare().then(() => {
         joinedAt: Date.now(),
       };
       experimentState.clients.set(socket.id, { ...client, role, roomCode });
+      socket.data.roomCode = roomCode;
+      socket.data.role = role;
       log(`JOIN_ROOM  socket=${socket.id}  role=${role}  room=${roomCode}`);
       socket.emit('LOG', `[SERVER] ${role.toUpperCase()} joined room ${roomCode}`);
+      if (syncV2Enabled && roomsStore.get(roomCode)?.queue.length) {
+        scheduleV2Playback(roomCode, 'resync', null);
+      }
+    });
+
+    socket.on('PLAYBACK_READY', ({ roomCode, requestId, revision, rttMs }) => {
+      if (!syncV2Enabled || !roomCode || socket.data.roomCode !== roomCode) return;
+      const schedule = pendingV2Schedules.get(roomCode);
+      if (!schedule || schedule.requestId !== requestId || schedule.revision !== revision) return;
+      if (!schedule.targetSocketIds.includes(socket.id)) return;
+      schedule.readySocketIds.add(socket.id);
+      if (Number.isFinite(rttMs) && rttMs >= 0 && rttMs <= 5000) schedule.readyRtts.push(rttMs);
+      diag('SERVER', roomCode, 'SYNC_V2', 'ready', {
+        requestId,
+        socketId: socket.id,
+        ready: schedule.readySocketIds.size,
+        expected: schedule.targetSocketIds.length,
+      });
+      if (schedule.readySocketIds.size === schedule.targetSocketIds.length) finishV2Schedule(schedule);
+    });
+
+    socket.on('SYNC_QUALITY', (sample) => {
+      if (!syncV2Enabled || !sample || socket.data.roomCode !== sample.roomCode) return;
+      if (!Number.isFinite(sample.errorMs) || !Number.isFinite(sample.uncertaintyMs)) return;
+      io.to(sample.roomCode).emit('SYNC_QUALITY', {
+        roomCode: sample.roomCode,
+        clientId: socket.id,
+        errorMs: Math.max(-60_000, Math.min(60_000, sample.errorMs)),
+        uncertaintyMs: Math.max(0, Math.min(60_000, sample.uncertaintyMs)),
+        sampledAt: Date.now(),
+      });
     });
 
     socket.on('ROOM_SYNC', ({ roomCode, message, timestamp }) => {
@@ -80,10 +234,35 @@ app.prepare().then(() => {
       socket.to(roomCode).emit('ROOM_SYNC', { roomCode, message, timestamp });
     });
 
+    socket.on('SYNC_MEASUREMENT', (sample) => {
+      if (process.env.SYNC_MEASUREMENTS !== 'true' || !sample || typeof sample !== 'object') return;
+      const client = experimentState.clients.get(socket.id);
+      if (!client?.roomCode || client.roomCode !== sample.roomCode) return;
+      const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+      if (!finite(sample.serverTime) || !finite(sample.expectedPosition) || !finite(sample.playerTime)) return;
+
+      log(`[SYNC:MEASUREMENT] ${JSON.stringify({
+        receivedAtServerTime: Date.now(),
+        roomCode: client.roomCode,
+        runId: String(sample.runId || '').slice(0, 80),
+        clientId: String(sample.clientId || '').slice(0, 80),
+        role: String(sample.role || '').slice(0, 20),
+        serverTime: sample.serverTime,
+        expectedPosition: sample.expectedPosition,
+        playerTime: sample.playerTime,
+        playerState: Number.isInteger(sample.playerState) ? sample.playerState : null,
+        trackId: String(sample.trackId || '').slice(0, 32),
+      })}`);
+    });
+
     const broadcastPlaybackUpdate = (event, { roomCode, seq, revision }) => {
       if (!roomCode) return;
       const room = roomsStore.get(roomCode);
       if (!room || revision !== room.revision) return;
+      if (syncV2Enabled) {
+        scheduleV2Playback(roomCode, event.toLowerCase(), seq);
+        return;
+      }
       const broadcastAt = Date.now();
       const update = {
         roomCode,
@@ -144,6 +323,11 @@ app.prepare().then(() => {
       room.lastActivity = Date.now();
       roomsStore.set(roomCode, room);
 
+      if (syncV2Enabled) {
+        scheduleV2Playback(roomCode, 'next', seq ?? null);
+        return;
+      }
+
       const serverSentAt = performance.now();
       const command = {
         roomCode,
@@ -187,6 +371,11 @@ app.prepare().then(() => {
       room.revision += 1;
       room.lastActivity = Date.now();
       roomsStore.set(roomCode, room);
+
+      if (syncV2Enabled) {
+        scheduleV2Playback(roomCode, 'previous', seq ?? null);
+        return;
+      }
 
       const serverSentAt = performance.now();
       const command = {

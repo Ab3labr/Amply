@@ -6,7 +6,16 @@
     "dev": "node server.js",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "playwright test",
+    "test:drift": "node tests/drift-measure.mjs",
+    "test:load": "node tests/socket-load.mjs",
+    "test:key-exposure": "node tests/check-client-key.mjs",
+    "test:room-restart": "node tests/room-restart.mjs",
+    "test:process-safety": "node tests/process-safety.mjs",
+    "test:baseline": "node tests/real-youtube-baseline.mjs",
+    "test:sync-v2-core": "node tests/sync-v2-core.mjs",
+    "test:sync-v2-server": "node tests/sync-v2-server.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.43.0",
@@ -19,6 +28,7 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

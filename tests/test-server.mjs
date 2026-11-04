@@ -46,7 +46,7 @@ const mockApi = createServer((request, response) => {
 
 const controlPort = Number(process.env.AMPLY_TEST_CONTROL_PORT || (Number(process.env.AMPLY_TEST_PORT || 3310) + 1));
 const testControl = createServer(async (request, response) => {
-  if (request.method !== "POST" || request.url !== "/age-room") {
+  if (request.method !== "POST" || (request.url !== "/age-room" && request.url !== "/room-state")) {
     response.writeHead(404);
     response.end();
     return;
@@ -55,10 +55,21 @@ const testControl = createServer(async (request, response) => {
   let body = "";
   for await (const chunk of request) body += chunk;
   const { roomCode } = JSON.parse(body || "{}");
-  const room = global.rooms?.get(String(roomCode || "").toUpperCase());
+  const room = global.rooms?.get(String(roomCode || "").trim().toUpperCase());
   if (!room) {
     response.writeHead(404);
     response.end(JSON.stringify({ error: "Room not found" }));
+    return;
+  }
+
+  if (request.url === "/room-state") {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({
+      lastActivity: room.lastActivity,
+      revision: room.revision,
+      currentSongIndex: room.currentSongIndex,
+      isPlaying: room.isPlaying,
+    }));
     return;
   }
 

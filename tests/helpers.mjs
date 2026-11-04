@@ -155,3 +155,14 @@ export async function ageRoomForCleanup(roomCode) {
   if (!response.ok) throw new Error(`Room aging failed: ${response.status}`);
   return response.json();
 }
+
+export async function readRoomStateForTest(roomCode) {
+  const controlPort = Number(process.env.AMPLY_TEST_CONTROL_PORT || (Number(process.env.AMPLY_TEST_PORT || 3310) + 1));
+  const response = await fetch(`http://127.0.0.1:${controlPort}/room-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomCode }),
+  });
+  if (!response.ok) throw new Error(`Room state read failed: ${response.status}`);
+  return response.json();
+}

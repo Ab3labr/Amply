@@ -1,4 +1,5 @@
 import { Participant } from "@/components/ui/ParticipantItem";
+import { cleanupExpiredRooms as cleanupRooms } from "./room-lifecycle";
 
 export interface QueueItem {
   id: string;
@@ -60,14 +61,9 @@ if (process.env.NODE_ENV !== "production") {
   globalForStore.rooms = roomsStore;
 }
 
-// Clean up rooms that haven't been active for more than 24 hours
+// Clean up rooms that haven't been active for more than 24 hours. The timer in
+// server.js uses the same shared rule, so cleanup no longer depends on a new
+// room being created.
 export function cleanupExpiredRooms() {
-  const now = Date.now();
-  const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
-  
-  for (const [code, room] of roomsStore.entries()) {
-    if (now - room.lastActivity > EXPIRY_MS) {
-      roomsStore.delete(code);
-    }
-  }
+  return cleanupRooms(roomsStore);
 }

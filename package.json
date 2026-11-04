@@ -15,6 +15,7 @@
     "test:process-safety": "node tests/process-safety.mjs",
     "test:room-code": "node tests/room-code-canonical.mjs",
     "test:production": "node tests/production-start.mjs",
+    "test:room-expiry": "node tests/room-expiry.mjs",
     "test:baseline": "node tests/real-youtube-baseline.mjs",
     "test:sync-v2-core": "node tests/sync-v2-core.mjs",
     "test:sync-v2-server": "node tests/sync-v2-server.mjs"

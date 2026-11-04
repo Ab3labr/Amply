@@ -6,6 +6,7 @@ const { Server: SocketIOServer } = require('socket.io');
 const next = require('next');
 const { diag } = require('./sync-diag');
 const { canonicalizeRoomCode } = require('./src/lib/room-code.js');
+const { cleanupExpiredRooms } = require('./src/lib/room-lifecycle.js');
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
@@ -21,6 +22,32 @@ if (!globalForStore.rooms) {
   globalForStore.rooms = new Map();
 }
 const roomsStore = globalForStore.rooms;
+
+// ── Room activity & expiry ────────────────────────────────────────────────
+// A room is alive while someone is talking to it. Any room-scoped socket event
+// refreshes `lastActivity` so a busy room cannot be swept away mid-session.
+function touchRoom(roomCode) {
+  if (!roomCode) return;
+  const room = roomsStore.get(roomCode);
+  if (!room) return;
+  room.lastActivity = Date.now();
+  roomsStore.set(roomCode, room);
+}
+
+// Cleanup must not depend on someone creating a new room: sweep on a timer
+// using the same TTL rule as the HTTP store (src/lib/room-lifecycle.js).
+const cleanupIntervalMs = Number(process.env.ROOM_CLEANUP_INTERVAL_MS) > 0
+  ? Number(process.env.ROOM_CLEANUP_INTERVAL_MS)
+  : 60_000;
+const cleanupTimer = setInterval(() => {
+  try {
+    const removed = cleanupExpiredRooms(roomsStore);
+    if (removed > 0) log(`Room cleanup removed ${removed} expired room(s)`);
+  } catch (error) {
+    log(`[ROOM_CLEANUP] failed: ${error?.message || error}`);
+  }
+}, cleanupIntervalMs);
+cleanupTimer.unref();
 
 // ── Experiment state ──────────────────────────────────────────────────────
 // Tracks all connected clients for the current session.
@@ -223,6 +250,7 @@ app.prepare().then(() => {
       const roomCode = canonicalizeRoomCode(payload.roomCode);
       if (!roomCode) return;
       const role = isNonEmptyString(payload.role) ? payload.role.trim() : 'guest';
+      touchRoom(roomCode);
       socket.join(roomCode);
       const client = experimentState.clients.get(socket.id) || {
         role,
@@ -244,6 +272,7 @@ app.prepare().then(() => {
       const { requestId, revision, rttMs } = payload;
       const roomCode = canonicalizeRoomCode(payload.roomCode);
       if (!syncV2Enabled || !roomCode || socket.data.roomCode !== roomCode) return;
+      touchRoom(roomCode);
       const schedule = pendingV2Schedules.get(roomCode);
       if (!schedule || schedule.requestId !== requestId || schedule.revision !== revision) return;
       if (!schedule.targetSocketIds.includes(socket.id)) return;
@@ -263,6 +292,7 @@ app.prepare().then(() => {
       const roomCode = canonicalizeRoomCode(sample.roomCode);
       if (!roomCode || socket.data.roomCode !== roomCode) return;
       if (!Number.isFinite(sample.errorMs) || !Number.isFinite(sample.uncertaintyMs)) return;
+      touchRoom(roomCode);
       io.to(roomCode).emit('SYNC_QUALITY', {
         roomCode,
         clientId: socket.id,
@@ -278,6 +308,7 @@ app.prepare().then(() => {
       if (!roomCode) return;
       const message = typeof payload.message === 'string' ? payload.message.slice(0, 200) : '';
       const timestamp = Number.isFinite(payload.timestamp) ? payload.timestamp : null;
+      touchRoom(roomCode);
       log(`ROOM_SYNC  room=${roomCode}  message=${message}  timestamp=${timestamp}`);
       socket.to(roomCode).emit('ROOM_SYNC', { roomCode, message, timestamp });
     });
@@ -289,6 +320,7 @@ app.prepare().then(() => {
       if (!client?.roomCode || !roomCode || client.roomCode !== roomCode) return;
       const finite = (value) => typeof value === 'number' && Number.isFinite(value);
       if (!finite(sample.serverTime) || !finite(sample.expectedPosition) || !finite(sample.playerTime)) return;
+      touchRoom(roomCode);
 
       log(`[SYNC:MEASUREMENT] ${JSON.stringify({
         receivedAtServerTime: Date.now(),
@@ -309,6 +341,7 @@ app.prepare().then(() => {
       const { roomCode: rawRoomCode, seq, revision } = payload;
       const roomCode = canonicalizeRoomCode(rawRoomCode);
       if (!roomCode) return;
+      touchRoom(roomCode);
       const room = roomsStore.get(roomCode);
       if (!room || revision !== room.revision) return;
       if (syncV2Enabled) {
@@ -472,6 +505,7 @@ app.prepare().then(() => {
     // persisted.
     onEvent(socket, "CLOCK_SYNC", (payload, ack) => {
       const roomCode = isObject(payload) ? canonicalizeRoomCode(payload.roomCode) || null : null;
+      touchRoom(roomCode);
       const t1 = Date.now();
       if (typeof ack === "function") {
         ack({ t1, t2: Date.now() });

@@ -1,7 +1,7 @@
 # Real YouTube Baseline
 
-- Run date: 2026-11-03T12:33:25.812Z
-- Room: Q7KHYT
+- Run date: 2026-11-04T09:24:29.037Z
+- Room: 5VDUNV
 - Duration: 180 seconds
 - Source: real YouTube IFrame API, visible 640x360 players; no player test double.
 - Automation: local Chromium launched with `--autoplay-policy=no-user-gesture-required`.
@@ -10,10 +10,10 @@
 
 | Client | Samples | Min ms | Avg ms | p95 ms | Max ms | Clock RTT ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| host | 360 | 2.5 | 709.9 | 1847.9 | 1849.0 | 0.7 |
-| guest-1 | 360 | 0.0 | 172.0 | 508.0 | 524.8 | 0.9 |
-| guest-2 | 358 | 0.0 | 200.8 | 497.2 | 507.8 | 0.9 |
-| guest-3 | 360 | 0.0 | 214.7 | 514.3 | 530.4 | 0.6 |
+| host | 360 | 2.3 | 943.7 | 1837.4 | 1838.2 | 0.7 |
+| guest-1 | 360 | 0.0 | 360.0 | 1657.9 | 1674.2 | 0.6 |
+| guest-2 | 358 | 0.0 | 320.6 | 1647.7 | 1664.2 | 0.9 |
+| guest-3 | 360 | 0.0 | 708.5 | 2477.5 | 2561.9 | 1.0 |
 
 ## getCurrentTime Sampling Probe
 
@@ -21,10 +21,10 @@ The IFrame API documentation specifies a numeric elapsed time in seconds but doe
 
 | Client | Distinct reported values | Smallest observed positive step ms |
 | --- | ---: | ---: |
-| host | 87 | 50.0 |
-| guest-1 | 87 | 49.0 |
-| guest-2 | 86 | 49.6 |
-| guest-3 | 87 | 49.3 |
+| host | 77 | 60.0 |
+| guest-1 | 77 | 53.0 |
+| guest-2 | 77 | 59.0 |
+| guest-3 | 78 | 51.0 |
 
 ## Caveats
 

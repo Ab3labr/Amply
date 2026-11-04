@@ -5,6 +5,7 @@ const { createServer } = require('http');
 const { Server: SocketIOServer } = require('socket.io');
 const next = require('next');
 const { diag } = require('./sync-diag');
+const { canonicalizeRoomCode } = require('./src/lib/room-code.js');
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
@@ -217,7 +218,7 @@ app.prepare().then(() => {
 
     onEvent(socket, 'JOIN_ROOM', (payload) => {
       if (!isObject(payload)) return;
-      const roomCode = isNonEmptyString(payload.roomCode) ? payload.roomCode.trim() : '';
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
       if (!roomCode) return;
       const role = isNonEmptyString(payload.role) ? payload.role.trim() : 'guest';
       socket.join(roomCode);
@@ -238,8 +239,9 @@ app.prepare().then(() => {
 
     onEvent(socket, 'PLAYBACK_READY', (payload) => {
       if (!isObject(payload)) return;
-      const { roomCode, requestId, revision, rttMs } = payload;
-      if (!syncV2Enabled || !isNonEmptyString(roomCode) || socket.data.roomCode !== roomCode) return;
+      const { requestId, revision, rttMs } = payload;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!syncV2Enabled || !roomCode || socket.data.roomCode !== roomCode) return;
       const schedule = pendingV2Schedules.get(roomCode);
       if (!schedule || schedule.requestId !== requestId || schedule.revision !== revision) return;
       if (!schedule.targetSocketIds.includes(socket.id)) return;
@@ -255,11 +257,12 @@ app.prepare().then(() => {
     });
 
     onEvent(socket, 'SYNC_QUALITY', (sample) => {
-      if (!syncV2Enabled || !isObject(sample) || !isNonEmptyString(sample.roomCode)) return;
-      if (socket.data.roomCode !== sample.roomCode) return;
+      if (!syncV2Enabled || !isObject(sample)) return;
+      const roomCode = canonicalizeRoomCode(sample.roomCode);
+      if (!roomCode || socket.data.roomCode !== roomCode) return;
       if (!Number.isFinite(sample.errorMs) || !Number.isFinite(sample.uncertaintyMs)) return;
-      io.to(sample.roomCode).emit('SYNC_QUALITY', {
-        roomCode: sample.roomCode,
+      io.to(roomCode).emit('SYNC_QUALITY', {
+        roomCode,
         clientId: socket.id,
         errorMs: Math.max(-60_000, Math.min(60_000, sample.errorMs)),
         uncertaintyMs: Math.max(0, Math.min(60_000, sample.uncertaintyMs)),
@@ -268,8 +271,9 @@ app.prepare().then(() => {
     });
 
     onEvent(socket, 'ROOM_SYNC', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      const roomCode = payload.roomCode.trim();
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
       const message = typeof payload.message === 'string' ? payload.message.slice(0, 200) : '';
       const timestamp = Number.isFinite(payload.timestamp) ? payload.timestamp : null;
       log(`ROOM_SYNC  room=${roomCode}  message=${message}  timestamp=${timestamp}`);
@@ -279,7 +283,8 @@ app.prepare().then(() => {
     onEvent(socket, 'SYNC_MEASUREMENT', (sample) => {
       if (process.env.SYNC_MEASUREMENTS !== 'true' || !isObject(sample)) return;
       const client = experimentState.clients.get(socket.id);
-      if (!client?.roomCode || client.roomCode !== sample.roomCode) return;
+      const roomCode = canonicalizeRoomCode(sample.roomCode);
+      if (!client?.roomCode || !roomCode || client.roomCode !== roomCode) return;
       const finite = (value) => typeof value === 'number' && Number.isFinite(value);
       if (!finite(sample.serverTime) || !finite(sample.expectedPosition) || !finite(sample.playerTime)) return;
 
@@ -300,8 +305,8 @@ app.prepare().then(() => {
     const broadcastPlaybackUpdate = (event, payload) => {
       if (!isObject(payload)) return;
       const { roomCode: rawRoomCode, seq, revision } = payload;
-      if (!isNonEmptyString(rawRoomCode)) return;
-      const roomCode = rawRoomCode.trim();
+      const roomCode = canonicalizeRoomCode(rawRoomCode);
+      if (!roomCode) return;
       const room = roomsStore.get(roomCode);
       if (!room || revision !== room.revision) return;
       if (syncV2Enabled) {
@@ -326,29 +331,36 @@ app.prepare().then(() => {
     };
 
     onEvent(socket, 'PLAY', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      diag('SERVER', payload.roomCode, 'PLAY', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
-      broadcastPlaybackUpdate('PLAY', payload);
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
+      diag('SERVER', roomCode, 'PLAY', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('PLAY', { ...payload, roomCode });
     });
 
     onEvent(socket, 'PAUSE', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      diag('SERVER', payload.roomCode, 'PAUSE', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
-      broadcastPlaybackUpdate('PAUSE', payload);
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
+      diag('SERVER', roomCode, 'PAUSE', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('PAUSE', { ...payload, roomCode });
     });
 
     onEvent(socket, 'SEEK', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      diag('SERVER', payload.roomCode, 'SEEK', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
-      broadcastPlaybackUpdate('SEEK', payload);
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
+      diag('SERVER', roomCode, 'SEEK', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
+      broadcastPlaybackUpdate('SEEK', { ...payload, roomCode });
     });
 
     // ─── NEXT ──────────────────────────────────────────────────────────────
     // Host requests next track. Server updates room state and broadcasts a
     // timeline command so guests can switch deterministically.
     onEvent(socket, 'NEXT', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      const roomCode = payload.roomCode.trim();
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
       const seq = Number.isFinite(payload.seq) ? payload.seq : null;
       const serverReceivedAt = performance.now();
       const room = roomsStore.get(roomCode);
@@ -400,8 +412,9 @@ app.prepare().then(() => {
 
     // ─── PREVIOUS ───────────────────────────────────────────────────────────
     onEvent(socket, 'PREVIOUS', (payload) => {
-      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
-      const roomCode = payload.roomCode.trim();
+      if (!isObject(payload)) return;
+      const roomCode = canonicalizeRoomCode(payload.roomCode);
+      if (!roomCode) return;
       const seq = Number.isFinite(payload.seq) ? payload.seq : null;
       const serverReceivedAt = performance.now();
       const room = roomsStore.get(roomCode);
@@ -456,7 +469,7 @@ app.prepare().then(() => {
     // The client derives rtt + clock offset. This is session-only; nothing is
     // persisted.
     onEvent(socket, "CLOCK_SYNC", (payload, ack) => {
-      const roomCode = isObject(payload) && isNonEmptyString(payload.roomCode) ? payload.roomCode.trim() : null;
+      const roomCode = isObject(payload) ? canonicalizeRoomCode(payload.roomCode) || null : null;
       const t1 = Date.now();
       if (typeof ack === "function") {
         ack({ t1, t2: Date.now() });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { roomsStore } from "@/lib/store";
 import { diag } from "@/lib/sync-diag";
+import { canonicalizeRoomCode } from "@/lib/room-code";
 
 type Params = Promise<{ code: string }>;
 
@@ -10,7 +11,7 @@ export async function POST(
 ) {
   try {
     const params = await segmentData.params;
-    const code = params.code.toUpperCase();
+    const code = canonicalizeRoomCode(params.code);
     const room = roomsStore.get(code);
 
     if (!room) {

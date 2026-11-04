@@ -8,6 +8,7 @@ import {
 } from "@/lib/youtube";
 import { cleanChannelTitle, cleanText, formatDuration } from "@/lib/youtube-search";
 import { emitPlaybackCommand, emitQueueUpdate, emitScheduledPlayback } from "@/lib/socket-server";
+import { canonicalizeRoomCode } from "@/lib/room-code";
 
 type Params = Promise<{ code: string }>;
 
@@ -39,7 +40,7 @@ export async function POST(
 ) {
   try {
     const params = await segmentData.params;
-    const code = params.code.toUpperCase();
+    const code = canonicalizeRoomCode(params.code);
     const room = roomsStore.get(code);
 
     if (!room) {

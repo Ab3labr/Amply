@@ -8,11 +8,12 @@ import { getClockRtt, getClockUncertainty, getEstimatedServerTime, startClockSyn
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
+import { canonicalizeRoomCode } from "@/lib/room-code";
 
 export default function HostRoomPage({ params }: { params: Promise<{ code: string }> }) {
   console.log('[HOST PAGE] Component render');
   const resolvedParams = use(params);
-  const code = resolvedParams.code;
+  const code = canonicalizeRoomCode(resolvedParams.code);
 
   const [roomState, setRoomState] = useState<RoomData | null>(null);
   const [preparedCommand, setPreparedCommand] = useState<SyncV2Command | null>(null);

@@ -130,17 +130,17 @@ test("a room snapshot 404 redirects to the landing page without a closed-room no
   await expect(page.getByText(/room (closed|expired|does not exist)/i)).toHaveCount(0);
 });
 
-test("lowercase room links load over HTTP but do not join the uppercase Socket.IO room", async ({ request, baseURL }) => {
+test("lowercase and whitespace-padded room codes join the same Socket.IO room as HTTP", async ({ request, baseURL }) => {
   const roomCode = await createRoom(request, "Case Host");
   await addTrack(request, roomCode, "dQw4w9WgXcQ", "Case One");
   await addTrack(request, roomCode, "M7lc1UVf-VE", "Case Two");
   expect((await request.get(`/api/rooms/${roomCode.toLowerCase()}`)).status()).toBe(200);
-  const socket = await connectToRoom(baseURL, roomCode.toLowerCase(), "host");
+  const socket = await connectToRoom(baseURL, `  ${roomCode.toLowerCase()}  `, "host");
 
   try {
-    socket.emit("NEXT", { roomCode: roomCode.toLowerCase(), seq: 7002 });
+    socket.emit("NEXT", { roomCode: `  ${roomCode.toLowerCase()}  `, seq: 7002 });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect((await readRoom(request, roomCode)).currentSongIndex).toBe(0);
+    expect((await readRoom(request, roomCode)).currentSongIndex).toBe(1);
   } finally {
     socket.disconnect();
   }

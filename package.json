@@ -13,6 +13,7 @@
     "test:key-exposure": "node tests/check-client-key.mjs",
     "test:room-restart": "node tests/room-restart.mjs",
     "test:process-safety": "node tests/process-safety.mjs",
+    "test:room-code": "node tests/room-code-canonical.mjs",
     "test:baseline": "node tests/real-youtube-baseline.mjs",
     "test:sync-v2-core": "node tests/sync-v2-core.mjs",
     "test:sync-v2-server": "node tests/sync-v2-server.mjs"

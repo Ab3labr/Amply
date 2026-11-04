@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { roomsStore } from "@/lib/store";
+import { canonicalizeRoomCode } from "@/lib/room-code";
 
 type Params = Promise<{ code: string }>;
 
@@ -8,7 +9,7 @@ export async function GET(
   segmentData: { params: Params }
 ) {
   const params = await segmentData.params;
-  const code = params.code.toUpperCase();
+  const code = canonicalizeRoomCode(params.code);
   const room = roomsStore.get(code);
 
   if (!room) {

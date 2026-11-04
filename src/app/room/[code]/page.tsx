@@ -7,6 +7,7 @@ import { getClockRtt, getClockUncertainty, getEstimatedServerTime, startClockSyn
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
+import { canonicalizeRoomCode } from "@/lib/room-code";
 
 type PlaybackSocketPayload = {
   type?: SocketCommand["type"];
@@ -21,7 +22,7 @@ type PlaybackSocketPayload = {
 
 export default function GuestRoomPage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params);
-  const code = resolvedParams.code;
+  const code = canonicalizeRoomCode(resolvedParams.code);
   
   const [roomState, setRoomState] = useState<RoomData | null>(null);
   const [socketCommand, setSocketCommand] = useState<SocketCommand | null>(null);

@@ -65,6 +65,8 @@ process.on('unhandledRejection', (reason) => {
   log(`[FATAL] unhandledRejection: ${reason?.stack || reason}`);
 });
 
+log(`Mode: ${dev ? 'development' : 'production'}`);
+
 // ── Start ─────────────────────────────────────────────────────────────────
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {

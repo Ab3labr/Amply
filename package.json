@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node server.js",
     "build": "next build",
-    "start": "next start",
+    "start": "cross-env NODE_ENV=production node server.js",
     "lint": "eslint",
     "test": "playwright test",
     "test:drift": "node tests/drift-measure.mjs",
@@ -14,6 +14,7 @@
     "test:room-restart": "node tests/room-restart.mjs",
     "test:process-safety": "node tests/process-safety.mjs",
     "test:room-code": "node tests/room-code-canonical.mjs",
+    "test:production": "node tests/production-start.mjs",
     "test:baseline": "node tests/real-youtube-baseline.mjs",
     "test:sync-v2-core": "node tests/sync-v2-core.mjs",
     "test:sync-v2-server": "node tests/sync-v2-server.mjs"
@@ -34,6 +35,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",

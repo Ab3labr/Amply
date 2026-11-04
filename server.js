@@ -33,6 +33,37 @@ function log(msg, data = '') {
   console.log(`[SERVER ${ts}] ${msg}`, data);
 }
 
+// ── Socket.IO input safety ────────────────────────────────────────────────
+// Room state is in-memory: an unhandled exception that kills the process
+// would drop every room. Validate every payload and never let a handler
+// throw across the Socket.IO boundary.
+function isObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function onEvent(socket, event, handler) {
+  socket.on(event, (payload, ack) => {
+    try {
+      handler(payload, ack);
+    } catch (error) {
+      log(`[SOCKET] ${event} rejected malformed input: ${error?.message || error}`);
+    }
+  });
+}
+
+// Last-resort guard: log process-level failures instead of exiting and
+// dropping every in-memory room. Payload validation above is the real fix.
+process.on('uncaughtException', (error) => {
+  log(`[FATAL] uncaughtException: ${error?.stack || error}`);
+});
+process.on('unhandledRejection', (reason) => {
+  log(`[FATAL] unhandledRejection: ${reason?.stack || reason}`);
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
@@ -172,7 +203,9 @@ app.prepare().then(() => {
     log(`Client connected: ${socket.id}`);
 
     // ─── IDENTIFY ─────────────────────────────────────────────────────────
-    socket.on('IDENTIFY', ({ role }) => {
+    onEvent(socket, 'IDENTIFY', (payload) => {
+      if (!isObject(payload)) return;
+      const role = isNonEmptyString(payload.role) ? payload.role.trim() : 'unknown';
       experimentState.clients.set(socket.id, {
         role,
         ready: false,
@@ -182,8 +215,11 @@ app.prepare().then(() => {
       io.emit('LOG', `[${role.toUpperCase()}] ${socket.id.slice(0, 6)} connected`);
     });
 
-    socket.on('JOIN_ROOM', ({ roomCode, role }) => {
+    onEvent(socket, 'JOIN_ROOM', (payload) => {
+      if (!isObject(payload)) return;
+      const roomCode = isNonEmptyString(payload.roomCode) ? payload.roomCode.trim() : '';
       if (!roomCode) return;
+      const role = isNonEmptyString(payload.role) ? payload.role.trim() : 'guest';
       socket.join(roomCode);
       const client = experimentState.clients.get(socket.id) || {
         role,
@@ -200,8 +236,10 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on('PLAYBACK_READY', ({ roomCode, requestId, revision, rttMs }) => {
-      if (!syncV2Enabled || !roomCode || socket.data.roomCode !== roomCode) return;
+    onEvent(socket, 'PLAYBACK_READY', (payload) => {
+      if (!isObject(payload)) return;
+      const { roomCode, requestId, revision, rttMs } = payload;
+      if (!syncV2Enabled || !isNonEmptyString(roomCode) || socket.data.roomCode !== roomCode) return;
       const schedule = pendingV2Schedules.get(roomCode);
       if (!schedule || schedule.requestId !== requestId || schedule.revision !== revision) return;
       if (!schedule.targetSocketIds.includes(socket.id)) return;
@@ -216,8 +254,9 @@ app.prepare().then(() => {
       if (schedule.readySocketIds.size === schedule.targetSocketIds.length) finishV2Schedule(schedule);
     });
 
-    socket.on('SYNC_QUALITY', (sample) => {
-      if (!syncV2Enabled || !sample || socket.data.roomCode !== sample.roomCode) return;
+    onEvent(socket, 'SYNC_QUALITY', (sample) => {
+      if (!syncV2Enabled || !isObject(sample) || !isNonEmptyString(sample.roomCode)) return;
+      if (socket.data.roomCode !== sample.roomCode) return;
       if (!Number.isFinite(sample.errorMs) || !Number.isFinite(sample.uncertaintyMs)) return;
       io.to(sample.roomCode).emit('SYNC_QUALITY', {
         roomCode: sample.roomCode,
@@ -228,14 +267,17 @@ app.prepare().then(() => {
       });
     });
 
-    socket.on('ROOM_SYNC', ({ roomCode, message, timestamp }) => {
-      if (!roomCode) return;
+    onEvent(socket, 'ROOM_SYNC', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
+      const roomCode = payload.roomCode.trim();
+      const message = typeof payload.message === 'string' ? payload.message.slice(0, 200) : '';
+      const timestamp = Number.isFinite(payload.timestamp) ? payload.timestamp : null;
       log(`ROOM_SYNC  room=${roomCode}  message=${message}  timestamp=${timestamp}`);
       socket.to(roomCode).emit('ROOM_SYNC', { roomCode, message, timestamp });
     });
 
-    socket.on('SYNC_MEASUREMENT', (sample) => {
-      if (process.env.SYNC_MEASUREMENTS !== 'true' || !sample || typeof sample !== 'object') return;
+    onEvent(socket, 'SYNC_MEASUREMENT', (sample) => {
+      if (process.env.SYNC_MEASUREMENTS !== 'true' || !isObject(sample)) return;
       const client = experimentState.clients.get(socket.id);
       if (!client?.roomCode || client.roomCode !== sample.roomCode) return;
       const finite = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -255,8 +297,11 @@ app.prepare().then(() => {
       })}`);
     });
 
-    const broadcastPlaybackUpdate = (event, { roomCode, seq, revision }) => {
-      if (!roomCode) return;
+    const broadcastPlaybackUpdate = (event, payload) => {
+      if (!isObject(payload)) return;
+      const { roomCode: rawRoomCode, seq, revision } = payload;
+      if (!isNonEmptyString(rawRoomCode)) return;
+      const roomCode = rawRoomCode.trim();
       const room = roomsStore.get(roomCode);
       if (!room || revision !== room.revision) return;
       if (syncV2Enabled) {
@@ -280,20 +325,20 @@ app.prepare().then(() => {
       socket.to(roomCode).emit('PLAYBACK_UPDATE', update);
     };
 
-    socket.on('PLAY', (payload) => {
-      if (!payload?.roomCode) return;
+    onEvent(socket, 'PLAY', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
       diag('SERVER', payload.roomCode, 'PLAY', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
       broadcastPlaybackUpdate('PLAY', payload);
     });
 
-    socket.on('PAUSE', (payload) => {
-      if (!payload?.roomCode) return;
+    onEvent(socket, 'PAUSE', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
       diag('SERVER', payload.roomCode, 'PAUSE', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
       broadcastPlaybackUpdate('PAUSE', payload);
     });
 
-    socket.on('SEEK', (payload) => {
-      if (!payload?.roomCode) return;
+    onEvent(socket, 'SEEK', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
       diag('SERVER', payload.roomCode, 'SEEK', 'receive', { seq: payload.seq ?? null, revision: payload.revision ?? null });
       broadcastPlaybackUpdate('SEEK', payload);
     });
@@ -301,8 +346,10 @@ app.prepare().then(() => {
     // ─── NEXT ──────────────────────────────────────────────────────────────
     // Host requests next track. Server updates room state and broadcasts a
     // timeline command so guests can switch deterministically.
-    socket.on('NEXT', ({ roomCode, seq }) => {
-      if (!roomCode) return;
+    onEvent(socket, 'NEXT', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
+      const roomCode = payload.roomCode.trim();
+      const seq = Number.isFinite(payload.seq) ? payload.seq : null;
       const serverReceivedAt = performance.now();
       const room = roomsStore.get(roomCode);
       if (!room) return;
@@ -352,8 +399,10 @@ app.prepare().then(() => {
     });
 
     // ─── PREVIOUS ───────────────────────────────────────────────────────────
-    socket.on('PREVIOUS', ({ roomCode, seq }) => {
-      if (!roomCode) return;
+    onEvent(socket, 'PREVIOUS', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.roomCode)) return;
+      const roomCode = payload.roomCode.trim();
+      const seq = Number.isFinite(payload.seq) ? payload.seq : null;
       const serverReceivedAt = performance.now();
       const room = roomsStore.get(roomCode);
       if (!room) return;
@@ -406,14 +455,14 @@ app.prepare().then(() => {
     //   <----ack({t1, t2})---- (t2 = send time, server) ---->  client t3
     // The client derives rtt + clock offset. This is session-only; nothing is
     // persisted.
-    socket.on("CLOCK_SYNC", (payload, ack) => {
-      const roomCode = payload?.roomCode || null;
+    onEvent(socket, "CLOCK_SYNC", (payload, ack) => {
+      const roomCode = isObject(payload) && isNonEmptyString(payload.roomCode) ? payload.roomCode.trim() : null;
       const t1 = Date.now();
       if (typeof ack === "function") {
         ack({ t1, t2: Date.now() });
       }
       diag("CLOCK", roomCode, "CLOCK_SYNC", "respond", {
-        sample: payload?.sample ?? null,
+        sample: isObject(payload) ? payload.sample ?? null : null,
         t1,
         t2: Date.now(),
       });
@@ -421,7 +470,9 @@ app.prepare().then(() => {
 
     // ─── LOAD_VIDEO ───────────────────────────────────────────────────────
     // Host sends URL → server resets ready state and broadcasts to all.
-    socket.on('LOAD_VIDEO', ({ url }) => {
+    onEvent(socket, 'LOAD_VIDEO', (payload) => {
+      if (!isObject(payload) || !isNonEmptyString(payload.url)) return;
+      const url = payload.url.trim().slice(0, 2048);
       log(`LOAD_VIDEO  url=${url}`);
       experimentState.currentUrl = url;
 
@@ -437,7 +488,9 @@ app.prepare().then(() => {
 
     // ─── CLIENT_READY ─────────────────────────────────────────────────────
     // A client's YouTube player has cued the video (onStateChange → CUED).
-    socket.on('CLIENT_READY', ({ readyAt }) => {
+    onEvent(socket, 'CLIENT_READY', (payload) => {
+      if (!isObject(payload)) return;
+      const readyAt = Number.isFinite(payload.readyAt) ? payload.readyAt : null;
       const client = experimentState.clients.get(socket.id);
       if (!client) return;
 
@@ -463,9 +516,13 @@ app.prepare().then(() => {
     });
 
     // ─── DRIFT_REPORT ─────────────────────────────────────────────────────
-    socket.on('DRIFT_REPORT', ({ role, scheduledAt, actualStartAt, drift, ytCurrentTime }) => {
+    onEvent(socket, 'DRIFT_REPORT', (payload) => {
+      if (!isObject(payload)) return;
+      const role = isNonEmptyString(payload.role) ? payload.role.trim() : 'unknown';
+      const drift = Number.isFinite(payload.drift) ? payload.drift : null;
+      const ytCurrentTime = Number.isFinite(payload.ytCurrentTime) ? payload.ytCurrentTime : null;
       log(`DRIFT  role=${role}  drift=${drift}ms  ytTime=${ytCurrentTime}s`);
-      io.emit('LOG', `[DRIFT] ${role.toUpperCase()} | callDrift=${drift}ms | ytCurrentTime=${Number(ytCurrentTime).toFixed(3)}s`);
+      io.emit('LOG', `[${role.toUpperCase()}] | callDrift=${drift}ms | ytCurrentTime=${ytCurrentTime}s`);
     });
 
     // ─── DISCONNECT ───────────────────────────────────────────────────────

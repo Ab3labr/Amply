@@ -2,7 +2,7 @@
 
 **One room. Every device. Perfectly together.**
 
-# Hello Abel Saar
+# Hello Abel Saar Is In Oman
 
 Amply is a collaborative YouTube listening room. A host creates a room and shares a six-character code; guests join with a name and code and hear the same track at the same position. The host is the playback authority — anyone in the room can add tracks to the shared queue, but only the host controls playback.
 

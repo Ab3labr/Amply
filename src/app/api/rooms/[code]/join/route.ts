@@ -1,39 +1,44 @@
 import { NextResponse } from "next/server";
-import { roomsStore } from "@/lib/store";
+import { addRoomMember, normalizeRoomCode } from "@/lib/room-service";
+import { emitMembersUpdate } from "@/lib/socket-server";
 
 type Params = Promise<{ code: string }>;
+
+export const runtime = "nodejs";
 
 export async function POST(
   request: Request,
   segmentData: { params: Params }
 ) {
+  const { code: rawCode } = await segmentData.params;
+  const code = normalizeRoomCode(rawCode);
+  let body: unknown;
   try {
-    const params = await segmentData.params;
-    const code = params.code.toUpperCase();
-    const room = roomsStore.get(code);
-
-    if (!room) {
-      return NextResponse.json({ error: "Room does not exist" }, { status: 404 });
-    }
-
-    const { name } = await request.json();
-
-    if (!name) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
-
-    const newMember = {
-      id: `user-${Date.now()}`,
-      name,
-      status: "Connected" as const,
-    };
-
-    room.members.push(newMember);
-    room.lastActivity = Date.now();
-    roomsStore.set(code, room);
-
-    return NextResponse.json({ success: true, member: newMember }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to join room" }, { status: 500 });
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+  const rawName = (body as Record<string, unknown>).name;
+  const name = typeof rawName === "string" ? rawName.trim().slice(0, 40) : "";
+  if (!name) {
+    return NextResponse.json({ error: "Name is required." }, { status: 400 });
+  }
+
+  const joined = addRoomMember(code, name);
+  if (!joined) {
+    return NextResponse.json(
+      { error: "Room does not exist.", code: "room_not_found" },
+      { status: 404 }
+    );
+  }
+
+  emitMembersUpdate(code, { roomCode: code, ...joined.room });
+  return NextResponse.json(
+    { success: true, member: joined.member, room: joined.room },
+    { status: 200, headers: { "Cache-Control": "no-store" } }
+  );
 }

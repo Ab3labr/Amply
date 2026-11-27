@@ -38,7 +38,7 @@ Without a key, `GET /api/youtube/search` returns 503 and the search UI shows a c
 - **Rooms:** host creates a 6-char code, guests join by name + code, no accounts.
 - **Music search:** search by song/artist/keywords from the room header (desktop) or queue panel (mobile); results show thumbnail, title, channel and duration with **Add to queue** and **Play now** (host only). Debounced, cached server-side (5 min), rate-limited (30/min/IP).
 - **Direct links:** paste any YouTube URL (`watch?v=`, `youtu.be`, `/embed`, `/shorts`, `/live`) — canonicalized and de-duplicated (409 on repeats).
-- **Sync:** host-authoritative playback over the YouTube IFrame API; 2-second HTTP polling as reconciliation with Socket.IO (`PLAYBACK_COMMAND`, `QUEUE_UPDATE`) as the real-time overlay.
+- **Sync:** server-anchored playback state with HTTP mutations, 2-second polling/recovery and Socket.IO delivery of committed events. Independent YouTube embeds can still buffer or start at different audible times.
 - **Controls:** play/pause/next/previous, seek, keyboard shortcuts (Space, ←/→) on the host.
 
 ## Commands
@@ -46,15 +46,22 @@ Without a key, `GET /api/youtube/search` returns 503 and the search UI shows a c
 ```bash
 npm run dev      # Development (custom server: Next.js + Socket.IO)
 npm run build    # Production build
-npm run start    # Production server (next start — does NOT start Socket.IO)
+npm start        # Production custom server (run npm run build first)
+npm run test:backend # Backend integration tests; custom server must be running
 npm run lint     # ESLint (has a pre-existing finding backlog)
 npx tsc --noEmit # Type check
 ```
 
+### VS Code tasks
+
+Open the workspace and press **Ctrl+Shift+B** to start the development server using the default task in `.vscode/tasks.json`. Stop it with **Ctrl+C** in the task terminal. To run the production build or backend tests, open **Terminal → Run Task…** and select the Amply task; start the app before running backend tests.
+
 ## Architecture
 
 - Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Socket.IO.
-- Room state lives in an in-memory `Map` (`src/lib/store.ts`) shared between API routes and Socket.IO handlers — rooms do not survive a restart and this is not multi-instance safe.
+- Room state lives in an in-memory `Map` (`src/lib/store.ts`) shared by API routes and the custom server — it is single-process, volatile on restart and not multi-instance safe. Deployments must use the custom `server.js` runtime; confirm host topology and restart expectations before production rollout.
+- HTTP APIs are the only room mutation path. Socket.IO relays committed events. Host playback and `playNow` require a room-scoped host capability cookie plus same-origin requests.
+- `npm run test:backend` exercises API idempotency, join invariance, host authorization and Socket.IO non-mutation against `http://localhost:3000`. Start the app in another terminal first.
 - `src/lib/youtube.ts` is the single source of truth for video-ID/URL parsing; `src/lib/youtube-search.ts` normalizes search results.
 - Design tokens live in `src/app/globals.css` (cream/ink/coral editorial palette).
 

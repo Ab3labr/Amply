@@ -1,173 +1,188 @@
 "use client";
 
 import { GuestPlayer, type SocketCommand } from "@/components/ui/GuestPlayer";
-import { RoomData } from "@/lib/store";
-import { diag } from "@/lib/sync-diag";
+import type { RoomSnapshot } from "@/lib/store";
+import {
+  classifyRoomPollStatus,
+  isRoomSnapshot,
+  mergeRoomSnapshots,
+} from "@/lib/room-poll-policy";
 import { startClockSync, stopClockSync } from "@/lib/clock-sync";
-import { useState, useEffect, useRef, use } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { io, type Socket } from "socket.io-client";
+import { io } from "socket.io-client";
 
-type PlaybackSocketPayload = {
-  type?: SocketCommand["type"];
-  revision?: number;
-  songIndex?: number;
-  trackId?: string | null;
-  positionSeconds?: number;
-  progress?: number;
-  isPlaying?: boolean;
-  seq?: number | null;
-};
-
-export default function GuestRoomPage({ params }: { params: Promise<{ code: string }> }) {
-  const resolvedParams = use(params);
-  const code = resolvedParams.code;
-  
-  const [roomState, setRoomState] = useState<RoomData | null>(null);
+export default function GuestRoomPage({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = use(params);
+  const [roomState, setRoomState] = useState<RoomSnapshot | null>(null);
   const [socketCommand, setSocketCommand] = useState<SocketCommand | null>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const prevIndexRef = useRef<number | null>(null);
-  const roomStateRef = useRef<RoomData | null>(null);
-  const latestRevisionRef = useRef(-1);
-  const pendingCommandRef = useRef<SocketCommand | null>(null);
+  const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
+  const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
+  const roomStateRef = useRef<RoomSnapshot | null>(null);
+  const refreshRoomRef = useRef<() => void>(() => {});
   const router = useRouter();
+
+  const applySnapshot = useCallback((snapshot: RoomSnapshot) => {
+    const previousRevision = roomStateRef.current?.playbackRevision ?? -1;
+    const merged = mergeRoomSnapshots(roomStateRef.current, snapshot);
+    roomStateRef.current = merged;
+    setRoomState(merged);
+
+    if (snapshot.playbackRevision > previousRevision) {
+      setSocketCommand({
+        type: "update",
+        revision: snapshot.playbackRevision,
+        songIndex: snapshot.currentSongIndex,
+        trackId: snapshot.currentTrackId,
+        positionSeconds: snapshot.positionSeconds,
+        basePositionSeconds: snapshot.basePositionSeconds,
+        anchorServerTimeMs: snapshot.anchorServerTimeMs,
+        serverNowMs: snapshot.serverNowMs,
+        progress: snapshot.progress,
+        isPlaying: snapshot.isPlaying,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const socket = io({ path: "/socket.io" });
-    socketRef.current = socket;
-
     socket.on("connect", () => {
-      console.log(`[GUEST SOCKET] connected id=${socket.id}`);
       socket.emit("JOIN_ROOM", { roomCode: code, role: "guest" });
       startClockSync(socket, code);
+      setConnectionIssue((current) =>
+        current?.startsWith("Realtime connection") ? null : current
+      );
+      refreshRoomRef.current();
     });
-
     socket.on("disconnect", () => {
-      console.log("[GUEST SOCKET] disconnected");
+      setConnectionIssue("Realtime connection interrupted. Reconnecting…");
+    });
+    socket.on("connect_error", () => {
+      setConnectionIssue("Realtime connection interrupted. Reconnecting…");
     });
 
-    socket.on("ROOM_SYNC", (payload: any) => {
-      console.log("[GUEST SOCKET] ROOM_SYNC received", payload);
-    });
-
-    const acceptPlaybackCommand = (payload: PlaybackSocketPayload) => {
-      if (typeof payload.revision !== "number" || payload.revision <= latestRevisionRef.current) return;
-      if (typeof payload.songIndex !== "number") return;
-      const command: SocketCommand = {
-        type: payload.type ?? "update",
-        revision: payload.revision,
-        songIndex: payload.songIndex,
-        trackId: payload.trackId ?? null,
-        positionSeconds: payload.positionSeconds ?? 0,
-        progress: payload.progress ?? 0,
-        isPlaying: Boolean(payload.isPlaying),
-        seq: payload.seq,
-      };
-      latestRevisionRef.current = command.revision;
-      pendingCommandRef.current = command;
-      setSocketCommand(command);
-      const current = roomStateRef.current;
-      if (current) {
-        const next = {
-          ...current,
-          currentSongIndex: command.songIndex,
-          currentTrackId: command.trackId,
-          positionSeconds: command.positionSeconds,
-          progress: command.progress,
-          isPlaying: command.isPlaying,
-          revision: command.revision,
-        };
-        roomStateRef.current = next;
-        setRoomState(next);
-      }
-      diag("GUEST", code, command.type.toUpperCase(), "receive", {
-        seq: command.seq,
-        revision: command.revision,
-      });
+    const acceptRoomSnapshot = (payload: unknown) => {
+      if (!isRoomSnapshot(payload)) return;
+      setServerTimeOffsetMs(payload.serverNowMs - Date.now());
+      applySnapshot(payload);
     };
-
-    socket.on("PLAYBACK_UPDATE", acceptPlaybackCommand);
-    socket.on("PLAYBACK_COMMAND", acceptPlaybackCommand);
+    socket.on("PLAYBACK_UPDATE", acceptRoomSnapshot);
+    socket.on("PLAYBACK_COMMAND", acceptRoomSnapshot);
+    socket.on("MEMBERS_UPDATE", acceptRoomSnapshot);
+    socket.on("QUEUE_UPDATE", () => refreshRoomRef.current());
 
     return () => {
       socket.disconnect();
       stopClockSync();
     };
-  }, [code]);
+  }, [applySnapshot, code]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
+    let stopped = false;
+    let requestInFlight = false;
+    let refreshRequested = false;
+    let failures = 0;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = (delayMs: number) => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => void fetchRoom(), delayMs);
+    };
+
     const fetchRoom = async () => {
-      const startedAt = performance.now();
+      if (stopped) return;
+      if (requestInFlight) {
+        refreshRequested = true;
+        return;
+      }
+
+      requestInFlight = true;
+      const requestStartedAt = Date.now();
       try {
-        const res = await fetch(`/api/rooms/${code}`);
-        const receivedAt = performance.now();
-        diag("POLL", code, "room-state", "guest-response", {
-          rttMs: +(receivedAt - startedAt).toFixed(2),
+        const response = await fetch(`/api/rooms/${code}`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
         });
-        if (res.ok) {
-          const data: RoomData = await res.json();
-          data.positionSeconds ??= 0;
-          data.currentTrackId ??= data.queue[data.currentSongIndex]?.id ?? null;
-          if (roomStateRef.current && data.revision < latestRevisionRef.current) return;
-          const pending = pendingCommandRef.current;
-          const next = pending && pending.revision > data.revision
-            ? {
-                ...data,
-                currentSongIndex: pending.songIndex,
-                currentTrackId: pending.trackId,
-                positionSeconds: pending.positionSeconds,
-                progress: pending.progress,
-                isPlaying: pending.isPlaying,
-                revision: pending.revision,
-              }
-            : data;
-          if (prevIndexRef.current !== null && next.currentSongIndex !== prevIndexRef.current) {
-            diag("GUEST", code, "SONG_CHANGE", "poll-detected", {
-              from: prevIndexRef.current,
-              to: next.currentSongIndex,
-              isPlaying: next.isPlaying,
-            });
-          }
-          prevIndexRef.current = next.currentSongIndex;
-          latestRevisionRef.current = next.revision;
-          roomStateRef.current = next;
-          setRoomState(next);
-        } else {
-          router.push("/");
+        const disposition = classifyRoomPollStatus(response.status);
+        if (disposition === "missing") {
+          stopped = true;
+          router.replace("/");
+          return;
         }
-      } catch (e) {
-        console.error(e);
+        if (disposition === "retry") {
+          throw new Error(`Room snapshot returned HTTP ${response.status}.`);
+        }
+
+        const payload: unknown = await response.json();
+        if (!isRoomSnapshot(payload)) {
+          throw new Error("Room snapshot response had an invalid shape.");
+        }
+
+        const responseReceivedAt = Date.now();
+        setServerTimeOffsetMs(
+          payload.serverNowMs - (requestStartedAt + responseReceivedAt) / 2
+        );
+        applySnapshot(payload);
+        failures = 0;
+        setConnectionIssue((current) =>
+          current?.startsWith("Room state request failed") ? null : current
+        );
+        schedule(2_000);
+      } catch (error) {
+        if (stopped) return;
+        failures += 1;
+        setConnectionIssue("Room state request failed. Retrying without leaving the room…");
+        console.warn("[guest-room] Room snapshot request failed; retaining current state.", error);
+        const retryMs = Math.min(15_000, 1_000 * 2 ** Math.min(failures - 1, 4));
+        schedule(retryMs);
+      } finally {
+        requestInFlight = false;
+        if (refreshRequested && !stopped) {
+          refreshRequested = false;
+          schedule(0);
+        }
       }
     };
 
-    fetchRoom();
-    interval = setInterval(fetchRoom, 2000);
-
-    const socket = socketRef.current;
-    socket?.on("QUEUE_UPDATE", fetchRoom);
-
-    return () => {
-      clearInterval(interval);
-      socket?.off("QUEUE_UPDATE", fetchRoom);
+    refreshRoomRef.current = () => {
+      if (requestInFlight) {
+        refreshRequested = true;
+        return;
+      }
+      if (timeout) clearTimeout(timeout);
+      void fetchRoom();
     };
-  }, [code, router]);
+
+    void fetchRoom();
+    return () => {
+      stopped = true;
+      if (timeout) clearTimeout(timeout);
+      refreshRoomRef.current = () => {};
+    };
+  }, [applySnapshot, code, router]);
 
   return (
     <GuestPlayer
       roomCode={code}
-      queue={roomState?.queue || []}
+      queue={roomState?.queue ?? []}
       currentSongIndex={roomState?.currentSongIndex ?? 0}
       isPlaying={roomState?.isPlaying ?? false}
       positionSeconds={roomState?.positionSeconds ?? 0}
-      revision={roomState?.revision ?? -1}
+      basePositionSeconds={roomState?.basePositionSeconds ?? 0}
+      anchorServerTimeMs={roomState?.anchorServerTimeMs ?? null}
+      serverTimeOffsetMs={serverTimeOffsetMs}
+      revision={roomState?.playbackRevision ?? -1}
       currentTrackId={roomState?.currentTrackId ?? null}
       socketCommand={socketCommand}
       hostName={roomState?.hostName}
-      members={roomState?.members || []}
+      members={roomState?.members ?? []}
       loading={!roomState}
-        onLeave={() => router.replace("/join")}
+      connectionIssue={connectionIssue}
+      onLeave={() => router.replace("/join")}
     />
   );
 }

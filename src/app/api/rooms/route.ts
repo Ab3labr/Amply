@@ -1,55 +1,47 @@
 import { NextResponse } from "next/server";
-import { roomsStore, cleanupExpiredRooms } from "@/lib/store";
+import {
+  createRoom,
+  hostCapabilityCookieName,
+} from "@/lib/room-service";
 
-function generateRoomCode() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  let body: unknown;
   try {
-    const { hostName } = await request.json();
-
-    if (!hostName) {
-      return NextResponse.json({ error: "Host name is required" }, { status: 400 });
-    }
-
-    // Clean up expired rooms before creating a new one
-    cleanupExpiredRooms();
-
-    let roomCode = generateRoomCode();
-    while (roomsStore.has(roomCode)) {
-      roomCode = generateRoomCode();
-    }
-
-    const now = Date.now();
-    roomsStore.set(roomCode, {
-      hostName,
-      members: [
-        {
-          id: `host-${Date.now()}`,
-          name: hostName,
-          isHost: true,
-          status: "Online",
-        }
-      ],
-      queue: [],
-      currentSongIndex: 0,
-      currentTrackId: null,
-      isPlaying: false,
-      progress: 0,
-      positionSeconds: 0,
-      createdAt: now,
-      lastActivity: now,
-      revision: 0,
-    });
-
-    return NextResponse.json({ roomCode }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to create room" }, { status: 500 });
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const rawHostName = (body as Record<string, unknown>).hostName;
+  const hostName =
+    typeof rawHostName === "string" ? rawHostName.trim().slice(0, 40) : "";
+  if (!hostName) {
+    return NextResponse.json(
+      { error: "Host name is required." },
+      { status: 400 }
+    );
+  }
+
+  const created = createRoom(hostName);
+  const response = NextResponse.json(
+    { roomCode: created.roomCode },
+    {
+      status: 201,
+      headers: { "Cache-Control": "no-store" },
+    }
+  );
+  response.cookies.set(hostCapabilityCookieName(created.roomCode), created.hostToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: `/api/rooms/${created.roomCode}`,
+    maxAge: 60 * 60 * 24 * 30,
+  });
+  return response;
 }

@@ -6,13 +6,13 @@ import { getYouTubeVideoId } from "@/lib/youtube";
 import { RoomScreen } from "@/components/ui/RoomScreen";
 import { Participant } from "@/components/ui/ParticipantItem";
 import { diag } from "@/lib/sync-diag";
-
-declare global {
-  interface Window {
-    YT: any;
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
+import { useTrackVisualState } from "@/hooks/useTrackVisualState";
+import {
+  getYouTubeNamespace,
+  loadYouTubeIframeApi,
+  type YouTubePlayer,
+  type YouTubePlayerEvent,
+} from "@/lib/youtube-iframe-api";
 
 const YT_STATE_NAMES: Record<number, string> = {
   [-1]: "UNSTARTED",
@@ -37,6 +37,9 @@ export interface SocketCommand {
   songIndex: number;
   trackId: string | null;
   positionSeconds: number;
+  basePositionSeconds: number;
+  anchorServerTimeMs: number | null;
+  serverNowMs: number;
   progress: number;
   isPlaying: boolean;
   seq?: number | null;
@@ -48,12 +51,16 @@ interface GuestPlayerProps {
   currentSongIndex: number;
   isPlaying: boolean;
   positionSeconds: number;
+  basePositionSeconds: number;
+  anchorServerTimeMs: number | null;
+  serverTimeOffsetMs: number;
   revision: number;
   currentTrackId: string | null;
   socketCommand?: SocketCommand | null;
   hostName?: string;
   members?: Participant[];
   loading?: boolean;
+  connectionIssue?: string | null;
   onLeave?: () => void;
 }
 
@@ -63,18 +70,19 @@ export function GuestPlayer({
   currentSongIndex,
   isPlaying,
   positionSeconds,
+  basePositionSeconds,
+  anchorServerTimeMs,
+  serverTimeOffsetMs,
   revision,
   currentTrackId,
   socketCommand,
   hostName,
   members = [],
   loading = false,
+  connectionIssue,
   onLeave,
 }: GuestPlayerProps) {
-  const [played, setPlayed] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [isBuffering, setIsBuffering] = useState(false);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<YouTubePlayer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [playerInstanceReady, setPlayerInstanceReady] = useState(false);
@@ -84,33 +92,134 @@ export function GuestPlayer({
   const playerGenerationRef = useRef<number>(0);
   const prevVideoIdRef = useRef<string | null>(null);
   const loadedTrackRef = useRef<string | null>(null);
+  const activePlayerContainerRef = useRef<HTMLDivElement | null>(null);
   const waitingForCueRef = useRef(false);
   const appliedRevisionRef = useRef(-1);
   const desiredPlaybackRef = useRef({
     videoId: null as string | null,
     trackId: null as string | null,
     positionSeconds: 0,
+    basePositionSeconds: 0,
+    anchorServerTimeMs: null as number | null,
+    serverTimeOffsetMs: 0,
     isPlaying: false,
     revision: -1,
   });
   const applyPlaybackRef = useRef<((force?: boolean) => void) | null>(null);
 
   // Pre-cue player: hidden second player that pre-loads the next song
-  const preCuePlayerRef = useRef<any>(null);
+  const preCuePlayerRef = useRef<YouTubePlayer | null>(null);
   const preCueContainerRef = useRef<HTMLDivElement>(null);
+  const preCuePlayerContainerRef = useRef<HTMLDivElement | null>(null);
   const preCueGenerationRef = useRef<number>(0);
   const preCueReadyRef = useRef<boolean>(false);
   const preCueVideoIdRef = useRef<string | null>(null);
 
   const currentSong = queue[currentSongIndex];
-  const [displayedTrackId, setDisplayedTrackId] = useState(currentSong?.id);
+  const {
+    played,
+    setPlayed,
+    duration,
+    setDuration,
+    isBuffering,
+    setIsBuffering,
+    error: playerError,
+    setError: setPlayerError,
+  } = useTrackVisualState(currentSong?.id ?? null);
 
-  if (displayedTrackId !== currentSong?.id) {
-    setDisplayedTrackId(currentSong?.id);
-    setPlayed(0);
-    setDuration(0);
-    setIsBuffering(false);
-  }
+  const getDesiredPositionSeconds = useCallback(() => {
+    const desired = desiredPlaybackRef.current;
+    if (desired.isPlaying && desired.anchorServerTimeMs !== null) {
+      const estimatedServerNow = Date.now() + desired.serverTimeOffsetMs;
+      return Math.max(
+        0,
+        desired.basePositionSeconds +
+          Math.max(0, estimatedServerNow - desired.anchorServerTimeMs) / 1000
+      );
+    }
+    return Math.max(0, desired.positionSeconds);
+  }, []);
+
+  const createPreCuePlayer = useCallback((container: HTMLDivElement) => {
+    const yt = getYouTubeNamespace();
+    if (!yt) return;
+    const generation = preCueGenerationRef.current + 1;
+    preCueGenerationRef.current = generation;
+    preCuePlayerContainerRef.current = container;
+
+    const mount = document.createElement("div");
+    container.replaceChildren(mount);
+    const player = new yt.Player(mount, {
+      height: "200",
+      width: "200",
+      videoId: "",
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        modestbranding: 1,
+      },
+      events: {
+        onReady: (event: YouTubePlayerEvent) => {
+          if (preCueGenerationRef.current !== generation) return;
+          preCuePlayerRef.current = event.target;
+          try {
+            event.target.mute();
+          } catch (error) {
+            console.warn("[GuestPlayer] Could not mute the pre-cue player.", error);
+          }
+          diag("GUEST", roomCode, "pre-cue", "ready", {});
+          diag("PLAYER", roomCode, "pre-cue", "ready", { role: "guest" });
+        },
+        onStateChange: (event: YouTubePlayerEvent) => {
+          const isActivePlayer = playerRef.current === event.target;
+          if (!isActivePlayer && preCueGenerationRef.current !== generation) return;
+          if (isActivePlayer) {
+            if (event.data === yt.PlayerState.CUED) {
+              waitingForCueRef.current = false;
+              setIsBuffering(false);
+              setPlayerError(null);
+              applyPlaybackRef.current?.(true);
+            } else if (event.data === yt.PlayerState.PLAYING) {
+              setIsBuffering(false);
+              setPlayerError(null);
+            } else if (event.data === yt.PlayerState.BUFFERING) {
+              setIsBuffering(true);
+            } else if (event.data === yt.PlayerState.PAUSED) {
+              setIsBuffering(false);
+            } else if (event.data === yt.PlayerState.ENDED) {
+              setIsBuffering(false);
+            }
+            return;
+          }
+
+          if (event.data === yt.PlayerState.PLAYING) {
+            diag("GUEST", roomCode, "pre-cue", "unexpected-playing", {
+              videoId: preCueVideoIdRef.current,
+            });
+          } else if (event.data === yt.PlayerState.BUFFERING) {
+            diag("GUEST", roomCode, "pre-cue", "buffering", {
+              videoId: preCueVideoIdRef.current,
+            });
+          } else if (event.data === yt.PlayerState.CUED) {
+            preCueReadyRef.current = true;
+            diag("GUEST", roomCode, "pre-cue", "cued", {
+              videoId: preCueVideoIdRef.current,
+            });
+          }
+        },
+        onError: (event: YouTubePlayerEvent) => {
+          if (playerRef.current === event.target) {
+            setPlayerError("The embedded player could not load this track. Try another track or refresh.");
+          } else if (preCueGenerationRef.current === generation) {
+            diag("GUEST", roomCode, "pre-cue", "error", { data: event.data });
+          }
+        },
+      },
+    });
+    preCuePlayerRef.current = player;
+  }, [roomCode, setIsBuffering, setPlayerError]);
 
   const syncVisualPosition = () => {
     try {
@@ -126,11 +235,14 @@ export function GuestPlayer({
           setPlayed(clampFraction(currentTime / nextDuration));
         }
       }
-    } catch {}
+    } catch (error) {
+      console.error("[GuestPlayer] Failed to read YouTube playback position.", error);
+    }
   };
 
   const applyAuthoritativePlayback = useCallback((force = false) => {
     let player = playerRef.current;
+    const preCuePlayer = preCuePlayerRef.current;
     const desired = desiredPlaybackRef.current;
     if (!player || !playerInstanceReady || !desired.videoId || !desired.trackId) return;
 
@@ -140,29 +252,34 @@ export function GuestPlayer({
       const canSwapPreCue =
         preCueReadyRef.current &&
         preCueVideoIdRef.current === desired.videoId &&
-        preCuePlayerRef.current;
+        preCuePlayer !== null;
 
-      if (canSwapPreCue) {
+      if (canSwapPreCue && preCuePlayer) {
         try { player.pauseVideo(); } catch {}
         try { player.mute(); } catch {}
-        try { preCuePlayerRef.current.pauseVideo(); } catch {}
-        try { preCuePlayerRef.current.unMute(); } catch {}
+        try { preCuePlayer.pauseVideo(); } catch {}
+        try { preCuePlayer.unMute(); } catch {}
         const oldPrimary = player;
-        playerRef.current = preCuePlayerRef.current;
+        const oldPrimaryContainer = activePlayerContainerRef.current;
+        playerRef.current = preCuePlayer;
+        activePlayerContainerRef.current = preCuePlayerContainerRef.current;
         preCuePlayerRef.current = null;
+        preCuePlayerContainerRef.current = null;
         preCueReadyRef.current = false;
         preCueVideoIdRef.current = null;
         loadedTrackRef.current = desired.trackId;
         prevVideoIdRef.current = desired.videoId;
-        player = playerRef.current;
+        player = preCuePlayer;
         try { oldPrimary.destroy(); } catch {}
+        oldPrimaryContainer?.replaceChildren();
+        if (oldPrimaryContainer) createPreCuePlayer(oldPrimaryContainer);
       } else {
         loadedTrackRef.current = desired.trackId;
         prevVideoIdRef.current = desired.videoId;
         waitingForCueRef.current = true;
         player.cueVideoById({
           videoId: desired.videoId,
-          startSeconds: desired.positionSeconds,
+          startSeconds: getDesiredPositionSeconds(),
         });
         return;
       }
@@ -170,12 +287,13 @@ export function GuestPlayer({
 
     if (waitingForCueRef.current) return;
 
+    const targetPosition = getDesiredPositionSeconds();
     const currentTime = player.getCurrentTime?.();
     const drift = Number.isFinite(currentTime)
-      ? Math.abs(currentTime - desired.positionSeconds)
+      ? Math.abs(currentTime - targetPosition)
       : Number.POSITIVE_INFINITY;
     if (force || trackChanged || !desired.isPlaying || drift > 1.5) {
-      player.seekTo(desired.positionSeconds, true);
+      player.seekTo(targetPosition, true);
     }
 
     if (desired.isPlaying) {
@@ -184,26 +302,29 @@ export function GuestPlayer({
       player.pauseVideo?.();
     }
     appliedRevisionRef.current = Math.max(appliedRevisionRef.current, desired.revision);
-  }, [playerInstanceReady]);
+  }, [createPreCuePlayer, getDesiredPositionSeconds, playerInstanceReady]);
   // Load YouTube IFrame API
   useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = "https://www.youtube.com/iframe_api";
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-
-      window.onYouTubeIframeAPIReady = () => {
-        setPlayerReady(true);
-      };
-    } else {
-      setPlayerReady(true);
-    }
-  }, []);
+    let active = true;
+    loadYouTubeIframeApi()
+      .then(() => {
+        if (active) setPlayerReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error("[GuestPlayer] Failed to load the YouTube IFrame API.", error);
+        setPlayerError("The embedded player could not be initialized. Refresh and try again.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [setPlayerError]);
 
   // Initialize only after both the room snapshot and IFrame API are ready.
   useEffect(() => {
-    if (!playerReady || loading || !currentSong || !containerRef.current) return;
+    const container = containerRef.current;
+    const yt = getYouTubeNamespace();
+    if (!playerReady || !yt || loading || !currentSong || !container) return;
     // Keep the player instance; subsequent track changes are cued in place.
     if (playerRef.current) return;
 
@@ -221,8 +342,9 @@ export function GuestPlayer({
     // Mount it inside an unmanaged child so React can safely unmount the
     // room when the user navigates away.
     const playerMount = document.createElement('div');
-    containerRef.current.replaceChildren(playerMount);
-    new window.YT.Player(playerMount, {
+    container.replaceChildren(playerMount);
+    activePlayerContainerRef.current = container;
+    new yt.Player(playerMount, {
       height: '200',
       width: '200',
       videoId: '',
@@ -234,9 +356,9 @@ export function GuestPlayer({
         modestbranding: 1,
       },
       events: {
-        onReady: (event: any) => {
+        onReady: (event: YouTubePlayerEvent) => {
           if (playerGenerationRef.current !== generation) return;
-          playerRef.current = event.target as any;
+          playerRef.current = event.target;
           setPlayerInstanceReady(true);
           setIsBuffering(false);
           diag("GUEST", roomCode, "player", "onReady", { index: currentSongIndex });
@@ -249,8 +371,11 @@ export function GuestPlayer({
 
           applyPlaybackRef.current?.(true);
         },
-        onStateChange: (event: any) => {
-          if (playerGenerationRef.current !== generation) return;
+        onStateChange: (event: YouTubePlayerEvent) => {
+          if (
+            playerGenerationRef.current !== generation ||
+            playerRef.current !== event.target
+          ) return;
           diag("GUEST", roomCode, "yt-state", String(event.data), { index: currentSongIndex });
           {
             let liveVideoId: string | null = null;
@@ -267,11 +392,13 @@ export function GuestPlayer({
               index: currentSongIndex,
             });
           }
-          if (event.data === window.YT.PlayerState.ENDED) {
+          if (event.data === yt.PlayerState.ENDED) {
             setIsBuffering(false);
+            setPlayerError("This track ended. Waiting for the host to advance the room.");
             diag("GUEST", roomCode, "ENDED", "yt-ended", { index: currentSongIndex });
-          } else if (event.data === window.YT.PlayerState.PLAYING) {
+          } else if (event.data === yt.PlayerState.PLAYING) {
             setIsBuffering(false);
+            setPlayerError(null);
             const playingAt = performance.now();
             diag("GUEST", roomCode, "PLAY", "yt-playing", { t: playingAt.toFixed(2) });
             setTimeout(() => {
@@ -282,26 +409,28 @@ export function GuestPlayer({
                 });
               }
             }, 250);
-          } else if (event.data === window.YT.PlayerState.PAUSED) {
+          } else if (event.data === yt.PlayerState.PAUSED) {
             setIsBuffering(false);
             syncVisualPosition();
             diag("GUEST", roomCode, "PAUSE", "yt-paused", {});
-          } else if (event.data === window.YT.PlayerState.BUFFERING) {
+          } else if (event.data === yt.PlayerState.BUFFERING) {
             setIsBuffering(true);
             syncVisualPosition();
             diag("GUEST", roomCode, "BUFFERING", "yt-buffering", { t: performance.now().toFixed(2) });
-          } else if (event.data === window.YT.PlayerState.CUED) {
+          } else if (event.data === yt.PlayerState.CUED) {
             const cuedVideoId = event.target?.getVideoData?.()?.video_id;
             if (cuedVideoId && cuedVideoId !== desiredPlaybackRef.current.videoId) return;
             setIsBuffering(false);
+            setPlayerError(null);
             waitingForCueRef.current = false;
             applyPlaybackRef.current?.(true);
             diag("GUEST", roomCode, "CUED", "yt-cued", { t: performance.now().toFixed(2) });
           }
         },
-        onError: (event: any) => {
+        onError: (event: YouTubePlayerEvent) => {
           if (playerGenerationRef.current !== generation) return;
-          console.debug('YouTube error:', event.data);
+          setPlayerError("The embedded player could not load this track. Try another track or refresh.");
+          console.error("[GuestPlayer] YouTube player error.", event.data);
         },
       },
     });
@@ -317,8 +446,8 @@ export function GuestPlayer({
         videoId: prevVideoIdRef.current ?? null,
       });
       playerRef.current = null;
-      containerRef.current?.replaceChildren();
-      setPlayerInstanceReady(false);
+      activePlayerContainerRef.current = null;
+      container.replaceChildren();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playerReady, loading, Boolean(currentSong)]);
@@ -327,60 +456,22 @@ export function GuestPlayer({
   // song so when the PLAYBACK_COMMAND arrives the video is already buffered.
   useEffect(() => {
     if (!playerReady || !preCueContainerRef.current) return;
-    if (preCuePlayerRef.current) return;
-
-    const generation = preCueGenerationRef.current + 1;
-    preCueGenerationRef.current = generation;
-
-    const preCueMount = document.createElement('div');
-    preCueContainerRef.current.replaceChildren(preCueMount);
-    new window.YT.Player(preCueMount, {
-      height: '200',
-      width: '200',
-      videoId: '',
-      playerVars: {
-        autoplay: 0,
-        controls: 0,
-        disablekb: 1,
-        fs: 0,
-        modestbranding: 1,
-      },
-      events: {
-        onReady: (event: any) => {
-          if (preCueGenerationRef.current !== generation) return;
-          preCuePlayerRef.current = event.target;
-          try { preCuePlayerRef.current.mute(); } catch {}
-          diag("GUEST", roomCode, "pre-cue", "ready", {});
-          diag("PLAYER", roomCode, "pre-cue", "ready", { role: "guest" });
-        },
-        onStateChange: (event: any) => {
-          if (preCueGenerationRef.current !== generation) return;
-          if (event.data === window.YT.PlayerState.PLAYING) {
-            diag("GUEST", roomCode, "pre-cue", "unexpected-playing", { videoId: preCueVideoIdRef.current });
-          } else if (event.data === window.YT.PlayerState.BUFFERING) {
-            diag("GUEST", roomCode, "pre-cue", "buffering", { videoId: preCueVideoIdRef.current });
-          } else if (event.data === window.YT.PlayerState.CUED) {
-            preCueReadyRef.current = true;
-            diag("GUEST", roomCode, "pre-cue", "cued", { videoId: preCueVideoIdRef.current });
-          }
-        },
-        onError: (event: any) => {
-          if (preCueGenerationRef.current !== generation) return;
-          diag("GUEST", roomCode, "pre-cue", "error", { data: event.data });
-        },
-      },
-    });
+    createPreCuePlayer(preCueContainerRef.current);
 
     return () => {
       preCueGenerationRef.current += 1;
-      try { preCuePlayerRef.current?.destroy(); } catch {}
+      try {
+        preCuePlayerRef.current?.destroy();
+      } catch (error) {
+        console.warn("[GuestPlayer] Failed to destroy the pre-cue player.", error);
+      }
       preCuePlayerRef.current = null;
-      preCueContainerRef.current?.replaceChildren();
+      preCuePlayerContainerRef.current?.replaceChildren();
+      preCuePlayerContainerRef.current = null;
       preCueReadyRef.current = false;
       preCueVideoIdRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerReady]);
+  }, [createPreCuePlayer, playerReady]);
 
   // Load next song on pre-cue player when current song changes
   useEffect(() => {
@@ -413,6 +504,11 @@ export function GuestPlayer({
       videoId: getYouTubeVideoId(currentSong?.url || ''),
       trackId: currentTrackId ?? currentSong?.id ?? null,
       positionSeconds: Number.isFinite(positionSeconds) ? Math.max(0, positionSeconds) : 0,
+      basePositionSeconds: Number.isFinite(basePositionSeconds)
+        ? Math.max(0, basePositionSeconds)
+        : 0,
+      anchorServerTimeMs,
+      serverTimeOffsetMs,
       isPlaying,
       revision,
     };
@@ -429,10 +525,14 @@ export function GuestPlayer({
     applyAuthoritativePlayback(force);
   }, [
     currentSong?.id,
+    currentSong?.url,
     currentSongIndex,
     currentTrackId,
     isPlaying,
     positionSeconds,
+    basePositionSeconds,
+    anchorServerTimeMs,
+    serverTimeOffsetMs,
     revision,
     socketCommand,
     playerInstanceReady,
@@ -445,18 +545,40 @@ export function GuestPlayer({
     if (!playerRef.current || !playerInstanceReady || !isPlaying) return;
 
     const interval = setInterval(() => {
-      if (playerRef.current && playerRef.current.getCurrentTime && playerRef.current.getDuration) {
-        const currentTime = playerRef.current.getCurrentTime();
-        const duration = playerRef.current.getDuration();
-        if (duration > 0) {
-          setDuration((prev) => (Math.abs(prev - duration) > 0.5 ? duration : prev));
-          setPlayed(currentTime / duration);
+      try {
+        const player = playerRef.current;
+        const currentTime = player?.getCurrentTime?.();
+        const durationSeconds = player?.getDuration?.();
+        if (
+          !player ||
+          typeof currentTime !== "number" ||
+          !Number.isFinite(currentTime) ||
+          typeof durationSeconds !== "number" ||
+          !Number.isFinite(durationSeconds) ||
+          durationSeconds <= 0
+        ) return;
+
+        const targetPosition = getDesiredPositionSeconds();
+        if (Math.abs(currentTime - targetPosition) > 1.5) {
+          player.seekTo(targetPosition, true);
         }
+        setDuration((previous) =>
+          Math.abs(previous - durationSeconds) > 0.5 ? durationSeconds : previous
+        );
+        setPlayed(clampFraction(currentTime / durationSeconds));
+      } catch (error) {
+        console.error("[GuestPlayer] Failed to reconcile playback position.", error);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPlaying, playerInstanceReady]);
+  }, [
+    getDesiredPositionSeconds,
+    isPlaying,
+    playerInstanceReady,
+    setDuration,
+    setPlayed,
+  ]);
 
   return (
     <>
@@ -474,6 +596,7 @@ export function GuestPlayer({
         hostName={hostName}
         members={members}
         loading={loading}
+        connectionIssue={playerError ?? connectionIssue}
         onLeave={() => onLeave?.()}
       />
     </>

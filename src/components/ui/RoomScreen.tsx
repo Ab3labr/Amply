@@ -26,6 +26,7 @@ interface RoomScreenProps {
   hostName?: string;
   members: Participant[];
   loading?: boolean;
+  connectionIssue?: string | null;
   onLeave: () => void;
   onPlayPause?: () => void;
   onPrev?: () => void;
@@ -44,6 +45,7 @@ export function RoomScreen({
   duration,
   members,
   loading = false,
+  connectionIssue = null,
   onLeave,
   onPlayPause,
   onPrev,
@@ -106,6 +108,14 @@ export function RoomScreen({
     >
       <div className="grain" aria-hidden="true" />
       <Toast />
+      {connectionIssue && (
+        <div
+          role="status"
+          className="fixed left-1/2 top-20 z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 border border-border-subtle bg-surface px-4 py-3 text-center text-sm text-secondary shadow-lg"
+        >
+          {connectionIssue}
+        </div>
+      )}
 
       <Topbar
         code={code}

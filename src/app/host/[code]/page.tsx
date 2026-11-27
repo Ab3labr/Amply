@@ -2,212 +2,149 @@
 
 import { HostPlayer } from "@/components/ui/HostPlayer";
 import { HostPlayerErrorBoundary } from "@/components/ui/HostPlayerErrorBoundary";
-import { RoomData } from "@/lib/store";
-import { diag, nextSeq } from "@/lib/sync-diag";
+import type { RoomSnapshot } from "@/lib/store";
+import {
+  classifyRoomPollStatus,
+  isRoomSnapshot,
+  mergeRoomSnapshots,
+} from "@/lib/room-poll-policy";
 import { startClockSync, stopClockSync } from "@/lib/clock-sync";
-import { useState, useEffect, useRef, use } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
-export default function HostRoomPage({ params }: { params: Promise<{ code: string }> }) {
-  console.log('[HOST PAGE] Component render');
-  const resolvedParams = use(params);
-  const code = resolvedParams.code;
-
-  const [roomState, setRoomState] = useState<RoomData | null>(null);
+export default function HostRoomPage({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = use(params);
+  const [roomState, setRoomState] = useState<RoomSnapshot | null>(null);
+  const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const prevIndexRef = useRef<number | null>(null);
-  const roomStateRef = useRef<RoomData | null>(null);
+  const roomStateRef = useRef<RoomSnapshot | null>(null);
+  const refreshRoomRef = useRef<() => void>(() => {});
   const router = useRouter();
 
-  // Component mount/unmount logging
-  useEffect(() => {
-    console.log('[HOST PAGE] Component MOUNTED');
-    return () => {
-      console.log('[HOST PAGE] Component UNMOUNTING');
-    };
+  const applyRoomSnapshot = useCallback((snapshot: RoomSnapshot) => {
+    const merged = mergeRoomSnapshots(roomStateRef.current, snapshot);
+    roomStateRef.current = merged;
+    setRoomState(merged);
   }, []);
 
   useEffect(() => {
-    console.log('[HOST PAGE] Socket.IO useEffect executing');
+    let active = true;
     const socket = io({ path: "/socket.io" });
     socketRef.current = socket;
 
+    const acceptRoomSnapshot = (payload: unknown) => {
+      if (!isRoomSnapshot(payload)) return;
+      applyRoomSnapshot(payload);
+    };
+
     socket.on("connect", () => {
-      try {
-        console.log(`[HOST SOCKET] connected id=${socket.id}`);
-        socket.emit("JOIN_ROOM", { roomCode: code, role: "host" });
-        socket.emit("ROOM_SYNC", { roomCode: code, message: "sync-test", timestamp: Date.now() });
-        startClockSync(socket, code);
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in connect handler:', error);
-      }
+      socket.emit("JOIN_ROOM", { roomCode: code, role: "host" });
+      startClockSync(socket, code);
+      setConnectionIssue(null);
+      refreshRoomRef.current();
     });
-
     socket.on("disconnect", () => {
-      try {
-        console.log("[HOST SOCKET] disconnected");
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in disconnect handler:', error);
-      }
+      if (active) setConnectionIssue("Realtime connection interrupted. Reconnecting…");
     });
-
-    socket.on("ROOM_SYNC", (payload: any) => {
-      try {
-        console.log("[HOST SOCKET] ROOM_SYNC received", payload);
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in ROOM_SYNC handler:', error);
-      }
+    socket.on("connect_error", () => {
+      if (active) setConnectionIssue("Realtime connection interrupted. Reconnecting…");
     });
-
-    socket.on("PLAY", (payload: any) => {
-      try {
-        console.log("[HOST SOCKET] PLAY received", payload);
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in PLAY handler:', error);
-      }
-    });
-
-    socket.on("PAUSE", (payload: any) => {
-      try {
-        console.log("[HOST SOCKET] PAUSE received", payload);
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in PAUSE handler:', error);
-      }
-    });
-
-    socket.on("SEEK", (payload: any) => {
-      try {
-        console.log("[HOST SOCKET] SEEK received", payload);
-      } catch (error) {
-        console.error('[HOST SOCKET] Error in SEEK handler:', error);
-      }
-    });
+    socket.on("PLAYBACK_UPDATE", acceptRoomSnapshot);
+    socket.on("PLAYBACK_COMMAND", acceptRoomSnapshot);
+    socket.on("MEMBERS_UPDATE", acceptRoomSnapshot);
+    socket.on("QUEUE_UPDATE", () => refreshRoomRef.current());
 
     return () => {
-      console.log('[HOST PAGE] Socket.IO useEffect cleanup - disconnecting socket');
-      try {
-        socket.disconnect();
-      } catch (error) {
-        console.error('[HOST PAGE] Error disconnecting socket:', error);
-      }
+      active = false;
+      socket.disconnect();
+      socketRef.current = null;
       stopClockSync();
     };
-  }, [code]);
-
-  const emitPlay = (positionSeconds: number, revision: number, seq?: number) => {
-    console.log('[HOST PAGE] emitPlay called');
-    try {
-      const s = seq ?? nextSeq();
-      diag("HOST", code, "PLAY", "emit", { seq: s });
-      socketRef.current?.emit("PLAY", { roomCode: code, timestamp: Date.now(), positionSeconds, revision, seq: s });
-    } catch (error) {
-      console.error('[HOST PAGE] Error in emitPlay:', error);
-    }
-  };
-
-  const emitPause = (positionSeconds: number, revision: number, seq?: number) => {
-    console.log('[HOST PAGE] emitPause called');
-    try {
-      const s = seq ?? nextSeq();
-      diag("HOST", code, "PAUSE", "emit", { seq: s });
-      socketRef.current?.emit("PAUSE", { roomCode: code, timestamp: Date.now(), positionSeconds, revision, seq: s });
-    } catch (error) {
-      console.error('[HOST PAGE] Error in emitPause:', error);
-    }
-  };
-
-  const emitSeek = (position: number, revision: number, seq?: number) => {
-    console.log('[HOST PAGE] emitSeek called', { position });
-    try {
-      const s = seq ?? nextSeq();
-      diag("HOST", code, "SEEK", "emit", { seq: s, position });
-      socketRef.current?.emit("SEEK", {
-        roomCode: code,
-        position,
-        positionSeconds: position,
-        revision,
-        timestamp: Date.now(),
-        seq: s,
-      });
-    } catch (error) {
-      console.error('[HOST PAGE] Error in emitSeek:', error);
-    }
-  };
-
-  const emitNext = (seq?: number) => {
-    try {
-      const s = seq ?? nextSeq();
-      diag("HOST", code, "NEXT", "emit", { seq: s });
-      socketRef.current?.emit("NEXT", { roomCode: code, seq: s });
-    } catch (error) {
-      console.error('[HOST PAGE] Error in emitNext:', error);
-    }
-  };
-
-  const emitPrevious = (seq?: number) => {
-    try {
-      const s = seq ?? nextSeq();
-      diag("HOST", code, "PREVIOUS", "emit", { seq: s });
-      socketRef.current?.emit("PREVIOUS", { roomCode: code, seq: s });
-    } catch (error) {
-      console.error('[HOST PAGE] Error in emitPrevious:', error);
-    }
-  };
+  }, [applyRoomSnapshot, code]);
 
   useEffect(() => {
-    console.log('[HOST PAGE] Room polling useEffect starting');
-    let interval: NodeJS.Timeout;
+    let stopped = false;
+    let requestInFlight = false;
+    let refreshRequested = false;
+    let failures = 0;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = (delayMs: number) => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => void fetchRoom(), delayMs);
+    };
 
     const fetchRoom = async () => {
-      const startedAt = performance.now();
+      if (stopped) return;
+      if (requestInFlight) {
+        refreshRequested = true;
+        return;
+      }
+
+      requestInFlight = true;
       try {
-        console.log('[HOST PAGE] Fetching room state');
-        const res = await fetch(`/api/rooms/${code}`);
-        const receivedAt = performance.now();
-        diag("POLL", code, "room-state", "host-response", {
-          rttMs: +(receivedAt - startedAt).toFixed(2),
+        const response = await fetch(`/api/rooms/${code}`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
         });
-        if (res.ok) {
-          const data = await res.json();
-          data.positionSeconds ??= 0;
-          data.currentTrackId ??= data.queue[data.currentSongIndex]?.id ?? null;
-          if (data.revision < (roomStateRef.current?.revision ?? -1)) return;
-          console.log('[HOST PAGE] Room state received:', {
-            queueLength: data.queue?.length,
-            currentSongIndex: data.currentSongIndex,
-            isPlaying: data.isPlaying,
-            progress: data.progress
-          });
-          if (prevIndexRef.current !== null && data.currentSongIndex !== prevIndexRef.current) {
-            diag("HOST", code, "SONG_CHANGE", "poll-detected", {
-              from: prevIndexRef.current,
-              to: data.currentSongIndex,
-              isPlaying: data.isPlaying,
-            });
-          }
-          prevIndexRef.current = data.currentSongIndex;
-          roomStateRef.current = data;
-          setRoomState(data);
-        } else {
-          console.error('[HOST PAGE] Room fetch failed, redirecting');
-          router.push("/");
+        const disposition = classifyRoomPollStatus(response.status);
+        if (disposition === "missing") {
+          stopped = true;
+          router.replace("/");
+          return;
         }
-      } catch (e) {
-        console.error('[HOST PAGE] Room fetch error:', e);
+        if (disposition === "retry") {
+          throw new Error(`Room snapshot returned HTTP ${response.status}.`);
+        }
+
+        const payload: unknown = await response.json();
+        if (!isRoomSnapshot(payload)) {
+          throw new Error("Room snapshot response had an invalid shape.");
+        }
+
+        const merged = mergeRoomSnapshots(roomStateRef.current, payload);
+        roomStateRef.current = merged;
+        setRoomState(merged);
+        failures = 0;
+        setConnectionIssue((current) =>
+          current?.startsWith("Room state request failed") ? null : current
+        );
+        schedule(2_000);
+      } catch (error) {
+        if (stopped) return;
+        failures += 1;
+        setConnectionIssue("Room state request failed. Retrying without leaving the room…");
+        console.warn("[host-room] Room snapshot request failed; retaining current state.", error);
+        const retryMs = Math.min(15_000, 1_000 * 2 ** Math.min(failures - 1, 4));
+        schedule(retryMs);
+      } finally {
+        requestInFlight = false;
+        if (refreshRequested && !stopped) {
+          refreshRequested = false;
+          schedule(0);
+        }
       }
     };
 
-    fetchRoom();
-    interval = setInterval(fetchRoom, 2000);
+    refreshRoomRef.current = () => {
+      if (requestInFlight) {
+        refreshRequested = true;
+        return;
+      }
+      if (timeout) clearTimeout(timeout);
+      void fetchRoom();
+    };
 
-    const socket = socketRef.current;
-    socket?.on("QUEUE_UPDATE", fetchRoom);
-
+    void fetchRoom();
     return () => {
-      console.log('[HOST PAGE] Room polling useEffect cleanup');
-      clearInterval(interval);
-      socket?.off("QUEUE_UPDATE", fetchRoom);
+      stopped = true;
+      if (timeout) clearTimeout(timeout);
+      refreshRoomRef.current = () => {};
     };
   }, [code, router]);
 
@@ -215,20 +152,18 @@ export default function HostRoomPage({ params }: { params: Promise<{ code: strin
     <HostPlayerErrorBoundary>
       <HostPlayer
         code={code}
-        queue={roomState?.queue || []}
+        queue={roomState?.queue ?? []}
         currentSongIndex={roomState?.currentSongIndex ?? 0}
         currentTrackId={roomState?.currentTrackId ?? null}
         positionSeconds={roomState?.positionSeconds ?? 0}
+        playbackRevision={roomState?.playbackRevision ?? 0}
         isPlaying={roomState?.isPlaying ?? false}
-        members={roomState?.members || []}
+        members={roomState?.members ?? []}
         hostName={roomState?.hostName}
         loading={!roomState}
+        connectionIssue={connectionIssue}
+        onRoomSnapshot={applyRoomSnapshot}
         onLeave={() => router.replace("/host-setup")}
-        onPlay={emitPlay}
-        onPause={emitPause}
-        onSeek={emitSeek}
-        onNext={emitNext}
-        onPrevious={emitPrevious}
       />
     </HostPlayerErrorBoundary>
   );

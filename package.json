@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.js",
+    "dev": "node server.js --dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.js",
+    "test:backend": "node --test tests/backend-room-api.test.mjs",
     "lint": "eslint"
   },
   "dependencies": {

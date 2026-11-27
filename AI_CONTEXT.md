@@ -1,6 +1,6 @@
 # Amply — AI Context & Project Memory
 
-> **Last audited:** 2026-11-01
+> **Last audited:** 2026-11-27
 > **Authority:** This file is the primary technical context and handoff. Verify all implementation details against `src/` and `server.js`; use `sync research/Amply_UI_UX_Design_Notes.md` as the approved visual direction. `PROJECT_HANDOFF.md` is a tracked but older handoff and is not current authority.
 >
 > **Archived change notes (2026-10-23; not a current implementation reference):**
@@ -12,7 +12,7 @@
 > **Changelog:** (1) Socket.IO PLAY/PAUSE now functionally control the guest player. The guest page tracks the latest socket command (a `SocketCommand` object) and GuestPlayer executes `playVideo()`/`pauseVideo()` immediately on receipt. HTTP polling remains as the reconciliation/fallback for state. (2) **Player-generation guard added to HostPlayer and GuestPlayer** — a replaced player's late `onReady`/`onStateChange` can no longer re-arm the ready flag with a stale/destroyed instance (fixes the host crash on song change). (3) **Host optimistic play/pause** — the host's own player now reacts at click time instead of waiting for the 2s poll, removing the host/guest asymmetry that was yanking guests backward via drift correction. (4) **Typography + real album art (UI/UX redesign v0.2 — part 1)** — Added Fraunces via `next/font/google` (`--font-fraunces`), exposed as the `font-display` Tailwind token and applied **only** to the now-playing song title in HostPlayer/GuestPlayer; everything else stays Inter. Added `thumbnailUrl` to `QueueItem`, populated at queue-add time in the queue route from the existing video ID (`img.youtube.com/vi/{id}/maxresdefault.jpg`); a shared `TrackThumbnail` component renders the fallback chain (`maxresdefault → hqdefault → mqdefault`) on error and is used for both the Now Playing art and the queue-list rows. Video-ID parsing was centralized in `src/lib/youtube.ts` (handles `watch?v=`, `youtu.be/`, `/embed/`) and is now shared by the players and the queue route instead of being duplicated inline. Build passed; lint error count unchanged from baseline. (5) **OpenDesign "Now Playing" integration (UI/UX v0.3)** — `/host/[code]` and `/room/[code]` now render the `design-reference/opendesign.html` visual system (source of truth = OpenDesign VISUAL, Amply FUNCTIONAL), while preserving every existing sync/Socket.IO/polling/server behavior. New layout: 68px `Topbar` (BrandMark wordmark, `RoomCodeChip` + copy, `AvatarStack` with real members, leave), centered `NowPlayingStage` (spinning vinyl + 3D-tilt album art via `PlayerArt`, Fraunces track title, eyebrow "Now playing/paused", `ProgressBar` with time readouts, `PlaybackControls` host-only), and a 384px right-rail `QueuePanel` ("Up next", add-input, display-only rows with thumbnails + equalizer on current row, footer). `@theme` tokens now use the warm `oklch` OpenDesign palette (`--color-accent` = warm amber); keyframes (`amply-spin`,`amply-eq`) + effect primitives (vinyl/grain/stage glows/eyebrow/queue scrollbar) live in `globals.css @layer components`. Host-only keyboard shortcuts added (Space play/pause, ←/→ seek). **Synchronization changed: none** — HostPlayer/GuestPlayer only re-render around the new stage; each gained local `duration` state, and host `ProgressBar` seek reuses the existing `handleSeek` → `onSeek` Socket.IO SEEK path (no new POST). Queue rows are display-only. Build + smoke tests pass (create/join/queue/play/pause/next/previous/progress/pages/socket handshake).
 > **Purpose:** Give a new coding session an accurate starting point. Read the current snapshot and `AGENTS.md`, then inspect the source before editing.
 
-## Current Technical Snapshot (2026-11-01)
+## Current Technical Snapshot (2026-11-27)
 
 ### Authority and product
 
@@ -36,8 +36,9 @@ Documentation authority:
 
 - Next.js 16.3 App Router, React 19.2, TypeScript 5, Tailwind CSS 4, Framer Motion 12, Socket.IO 4.8, Lucide icons.
 - YouTube playback uses the YouTube IFrame API directly. `react-player` remains a dependency but is not the active player implementation.
-- `npm run dev` runs `node server.js`, which hosts Next.js and Socket.IO in one Node process. API handlers and Socket.IO share `global.rooms`.
-- `npm run build` builds Next. `npm run start` runs `next start` and does not start the custom Socket.IO server; do not treat it as the full room runtime.
+- `npm run dev` runs `node server.js --dev`; `npm start` runs the custom Next.js + Socket.IO server in production mode. Run `npm run build` before starting production.
+- Room writes belong to Next.js HTTP APIs and `src/lib/room-service.ts`; Socket.IO is a committed-event relay only. `server.js` remains CommonJS and does not import TypeScript services or `@/` aliases.
+- Room state is a `globalThis`-backed in-memory map: one persistent Node process only, volatile on restart and not multi-instance safe. Production platform, process count and restart history remain unknown.
 - Dynamic route `params` are promises in this Next version. Read the installed Next documentation under `node_modules/next/dist/docs/` before changing route conventions.
 
 ### Routes and source map
@@ -54,7 +55,7 @@ Documentation authority:
 | `/api/rooms/[code]` | Return current room snapshot. |
 | `/api/rooms/[code]/join` | Add participant to the room. |
 | `/api/rooms/[code]/queue` | Validate/canonicalize a YouTube link or search result, detect duplicates and append or play it. |
-| `/api/rooms/[code]/player` | Persist playback action, position and normalized progress. |
+| `/api/rooms/[code]/player` | Commit host-authorized, revision-checked playback commands and broadcast committed snapshots. |
 | `/api/youtube/search` | Server-side YouTube Data API v3 search (`q`, optional `limit`), cached and rate-limited. |
 
 Directory map: `src/app/` contains public pages and route handlers; `src/components/ui/` contains shared screens/player/queue/search components; `src/lib/` contains room types/store, YouTube parsing, search normalization, metadata parsing, socket broadcast helpers, clock diagnostics and sync logging; `public/` contains public assets; `design-reference/` and `sync research/` hold reference material. Primary implementation files: `src/lib/store.ts`, `server.js`, `src/app/host/[code]/page.tsx`, `src/app/room/[code]/page.tsx`, `src/components/ui/HostPlayer.tsx`, `src/components/ui/GuestPlayer.tsx`, `src/components/ui/RoomScreen.tsx`, and `src/components/ui/MusicSearch.tsx`.
@@ -63,32 +64,32 @@ Directory map: `src/app/` contains public pages and route handlers; `src/compone
 
 Room creation generates a collision-checked uppercase alphanumeric code and stores the host as the first member. The join screen first fetches the room for confirmation, then posts the guest name to `/join`; the guest room route separately joins the Socket.IO room and polls the full state. The Socket.IO `JOIN_ROOM` handler does not send an initial room snapshot.
 
-`RoomData` in `src/lib/store.ts` contains `hostName`, `members`, `queue`, `currentSongIndex`, `currentTrackId`, `isPlaying`, normalized `progress`, authoritative `positionSeconds`, timestamps, and monotonically increasing `revision`. `QueueItem` contains `id`, canonical YouTube `url`, `videoId`, `title`, `thumbnailUrl`, optional `channelTitle`, `durationSeconds`, `durationLabel`, `addedBy` and `addedAt`. The store is an in-memory global `Map`, not durable or multi-instance safe. Room cleanup runs when creating a room; guest removal/leave cleanup is not implemented.
+`RoomData` in `src/lib/store.ts` stores `basePositionSeconds`, `anchorServerTimeMs`, and separate monotonic `playbackRevision`, `queueRevision` and `membersRevision` values. Public `RoomSnapshot` derives position from the server-time anchor and omits the host capability hash. The in-memory store sweeps rooms idle for 24 hours every 15 minutes; polling GETs refresh activity. It remains volatile and single-process; guest removal/leave cleanup is not implemented.
 
-The queue API accepts either a `videoId` (with optional search metadata) or a YouTube `url`. Both are canonicalized through `src/lib/youtube.ts`; non-YouTube or malformed IDs return 400. Search-result metadata is reused when supplied; direct URLs fall back to YouTube oEmbed for title/channel. Duplicate video IDs return 409 unless `playNow` is set. Adding the first track, or sending `playNow: true`, selects the track, resets position when it changes, starts playback and increments revision. Every accepted add emits `QUEUE_UPDATE` to the room, and playback starts/jumps additionally emit a canonical `PLAYBACK_COMMAND` through `src/lib/socket-server.ts` (`global.io` from `server.js`). Room pages still poll every two seconds as the fallback when the custom server is not running. `parseTrackMetadata` heuristically splits title/artist for display; it is not authoritative metadata, and `stripChannelPrefix` removes a repeated channel prefix when search metadata supplies the channel.
+The queue API accepts either a `videoId` (with optional search metadata) or a YouTube `url`. Both are canonicalized through `src/lib/youtube.ts`; malformed IDs return 400. Duplicate video IDs return 409 unless `playNow` is set. The first track receives an active time anchor. `playNow` requires same-origin plus the host capability; ordinary queue adds remain open. Accepted adds emit committed queue/playback events. `parseTrackMetadata` remains display-only.
 
 ### Playback authority and synchronization
 
 The host's YouTube IFrame `getCurrentTime()` is the playback-time source. `PlaybackOrbit` animates and displays `played`/`duration`; it is not an authoritative clock.
 
-1. The host reads actual seconds and duration from its IFrame. While playing, it samples about once per second, computes normalized progress for UI compatibility, and posts `{ positionSeconds, progress, trackId }`. The host serializes these HTTP writes so an earlier progress sample cannot arrive after a later control action.
-2. Host Play/Pause changes the host IFrame optimistically, captures actual current time, posts action + seconds + progress + track ID, and emits the corresponding Socket.IO event after the API response supplies the committed revision. Seek uses the requested IFrame position, persists it, then emits `SEEK` with the committed revision.
-3. The player API updates `isPlaying` for play/pause, preserves it for seek, stores seconds and normalized progress, checks track identity, and increments revision for accepted updates. A progress-only write while paused is ignored.
-4. The server does not trust a socket payload as room state. For `PLAY`, `PAUSE` or `SEEK`, it broadcasts a canonical `PLAYBACK_UPDATE` only when the payload revision exactly matches the current stored revision. The snapshot includes revision, track index/ID, position seconds, progress and play state.
-5. `NEXT`/`PREVIOUS` are handled in `server.js`: update track identity/index, reset position/progress, increment revision and emit `PLAYBACK_COMMAND`. They preserve the room's play/pause state when moving to another track; advancing past the last track stops playback. Host UI observes the result through its two-second room poll because the server emits to other sockets, not the sender; `QUEUE_UPDATE` lets both roles refetch immediately after a queue addition.
+1. The host IFrame drives local playback and display sampling; per-second samples are not persisted. Server playback state uses `{ trackId, isPlaying, basePositionSeconds, anchorServerTimeMs, playbackRevision }`; snapshots derive position from the server-time anchor.
+2. All playback mutations (play/pause/seek/next/previous/ended) go through `/api/rooms/[code]/player`. Each carries a command ID and expected revision/track. Identical retries return the committed result without repeating the action; stale state is rejected.
+3. API routes are the only room writers. After a successful commit, the route emits `PLAYBACK_UPDATE` or `PLAYBACK_COMMAND`; Socket.IO does not mutate room state. Queue and member updates have separate revision counters.
+4. The first queued track receives an active anchor when selected. Joining does not alter current playback or its revision. Host `playNow` and playback controls require a same-origin request and a room-scoped host capability cookie.
+5. Next/Previous preserve the current play/pause state when moving tracks; advancing past the queue stops playback. Duplicate `ENDED` reports are deduplicated by track/revision identity.
 6. A guest receives its initial state from the first `GET /api/rooms/[code]` response, not `JOIN_ROOM`. It initializes the primary IFrame only after room data and YouTube API readiness. The player starts with an empty video ID; the current video is cued with `cueVideoById`, not implicitly started by track loading.
 7. After `CUED`, the guest uses the latest desired state, seeks to authoritative seconds, then calls `playVideo()` only when `isPlaying` is true; otherwise it calls `pauseVideo()`. Incoming play, pause and seek updates follow the same seek-before-state path. Guests subscribe to both `PLAYBACK_UPDATE` and `PLAYBACK_COMMAND` and do not emit host playback commands.
 8. Host and guest poll room state every two seconds. Client refs reject snapshots with a lower revision; guests also reject socket commands whose revision is not newer and preserve a newer socket command if it arrives before the first snapshot. Polling remains necessary for queue/member changes and host receipt of navigation state.
 
-Socket events in active room playback: `JOIN_ROOM`, `PLAY`, `PAUSE`, `SEEK`, `NEXT`, `PREVIOUS`, `PLAYBACK_UPDATE`, `PLAYBACK_COMMAND`, and `QUEUE_UPDATE`. `ROOM_SYNC` is diagnostic. `CLOCK_SYNC` returns `t1`/`t2` for an NTP-style diagnostic estimator in `src/lib/clock-sync.ts`; this estimate is not consumed by playback or used to schedule a common future start.
+Socket events in active room playback: `JOIN_ROOM`, `PLAYBACK_UPDATE`, `PLAYBACK_COMMAND`, `QUEUE_UPDATE`, and `MEMBERS_UPDATE`. `JOIN_ROOM` subscribes to notifications but does not bootstrap state; clients fetch the HTTP snapshot. Legacy client `NEXT`/`PREVIOUS` events are ignored by state handling. `ROOM_SYNC` is diagnostic. `CLOCK_SYNC` is not used to schedule a common future start.
 
 ### YouTube lifecycle, UI and permissions
 
-`HostPlayer` and `GuestPlayer` each maintain a primary and hidden pre-cue IFrame, readiness/generation guards, and local played/duration values. Host cold track changes use `loadVideoById` while playing and `cueVideoById` while paused; the hidden host pre-cue player loads muted. Guest track changes cue without starting; its hidden pre-cue player also cues and never intentionally starts. The guest waits for `CUED`, rejects a callback for an obsolete video ID, then seeks and applies state. YouTube/browser autoplay restrictions can still prevent `playVideo()` from starting; there is no guest click-to-enable recovery UI.
+`HostPlayer` and `GuestPlayer` maintain primary/pre-cue IFrames, generation guards and track-keyed visual state. A shared typed YouTube API loader is used by both; script-load failures surface in the player UI. Guest track changes cue without starting and apply the current authoritative state after `CUED`. YouTube/browser autoplay restrictions can still prevent `playVideo()` from starting; there is no guest click-to-enable recovery UI.
 
 `MusicSearch` is the single add/search surface in the `Topbar` (desktop) and `QueuePanel` (below `lg`). It debounces text queries, aborts stale requests, detects direct YouTube links locally, and calls `GET /api/youtube/search` otherwise. Results show thumbnail, title, channel and duration; both roles get “add to queue”, only the host gets “play now”. The server-side search route requires `YOUTUBE_API_KEY` (see `.env.example`), queries `search.list` then `videos.list`, filters non-public/non-embeddable/zero-duration videos, caches results for five minutes (empty results one minute), deduplicates in-flight requests and rate-limits to 30 requests/minute per client IP. Missing configuration returns 503; quota exhaustion returns 429; upstream failures return 502. The key never reaches the client. There is no real API key checked in, so the happy path is currently exercised against a local mock of the YouTube API; direct URL adds still work without a key through oEmbed.
 
-`RoomScreen` is presentational: `Topbar`, `VinylRecord`, `PlaybackOrbit`, track/artwork, `QueuePanel`, and `PlaybackControls`. Guests receive a disabled playback control group plus “Only the host can control playback.” This is a UI permission, not server authorization: socket handlers accept client-supplied room/role fields without authenticating that the sender is the host. Queue endpoints likewise have no account-level authorization.
+`RoomScreen` is presentational: `Topbar`, `VinylRecord`, `PlaybackOrbit`, track/artwork, `QueuePanel`, and `PlaybackControls`. Guests receive disabled playback controls. The server verifies a per-room host capability for playback and `playNow`; this is not account authentication. Guests may still join and add to the queue.
 
 Current visual source is `src/app/globals.css`: cream `#f7f3e7`, ink `#080808`, coral `#d94135`, blue-violet `#465fb0`, IBM Plex Mono and Inter. The current room layout uses a left vinyl/orbit section and right track/artwork/queue/control section, stacked on narrow screens with a collapsible queue. It partially implements, but does not fully match, approved v1.0. See `DESIGN.md`; do not infer approved design from current source.
 
@@ -97,19 +98,22 @@ Current visual source is `src/app/globals.css`: cream `#f7f3e7`, ink `#080808`, 
 - YouTube IFrame playback is asynchronous and browser/network dependent. The current architecture synchronizes state/position but has no scheduled common start, clock compensation, or guarantee of zero audible skew.
 - The reported independent guest playback bug was traced to guest `loadVideoById()` starting on track changes, missing pause-position persistence, action-only play/pause commands, ignored guest seeks, missing `PLAYBACK_COMMAND` subscription and unguarded poll/socket ordering. The current source addresses these with persisted seconds, cue-before-play, revisioned state snapshots and lower-revision rejection; real YouTube verification remains outstanding.
 - Host Play/Pause waits for the state POST before emitting Socket.IO. Room/queue polling is two seconds; newly added tracks and host-observed Next/Previous may therefore lag. The supplied 2026-11-01 server sample showed a 16 ms player POST and 4 ms between persisted Pause and server socket receipt, which does not explain multi-second playback delay. Client-side YouTube timing still needs separate measurement.
-- Actual YouTube multi-browser synchronization has not been established by checked-in tests. `test-results/.last-run.json` says `status: failed` with no failed-test details; `package.json` has no test script. Do not mark the scenarios below verified from code presence or build success.
+- Pre-implementation, a synthetic `500` room GET caused both clients to redirect despite the room remaining healthy. The current pages now preserve state and retry on recoverable errors; a live browser check confirmed a synthetic `500` stayed in-room and recovered, while `404` still redirected.
+- Pre-implementation, duplicate socket `NEXT` messages advanced twice. Navigation now uses idempotent HTTP commands with expected playback revision/track. The maintained backend suite verifies duplicate `NEXT`, duplicate/obsolete `ENDED`, and Socket.IO non-mutation.
+- Pre-implementation progress writes churned revisions while IFrame position was stuck. The current server derives playback position from an anchor and does not persist per-second UI samples.
+- `npm run test:backend` now provides backend integration coverage. It does not validate audible YouTube synchronization; the local browser IFrame failed with error `5` / `html5.missingapi`, so actual media timing is still unverified.
 - A browser hydration warning showed `bis_skin_checked="1"` added to many DOM nodes, absent from server markup. This points to browser extension DOM injection (often security/browser tooling); verify in a clean profile before changing app rendering.
-- Room state is volatile and single-process. No host authentication, guest cleanup, playback retry UI, or autoplay recovery UI exists.
+- Room state is volatile and single-process; a 15-minute sweep removes rooms inactive for 24 hours. There is no guest leave/removal flow or autoplay recovery UI.
 - Music search requires a server-side `YOUTUBE_API_KEY`. Without it, `/api/youtube/search` returns 503 and the search UI shows the configuration message; direct YouTube URL adds still work (oEmbed). No real key is checked in, so the search happy path was verified against a local mock of the YouTube API, not the live API. Live-API behavior (real quota accounting, `videoSyndicated` filtering) remains unverified.
 - Search results are cached in process memory (five minutes) and rate-limited per IP (30/min). Both reset on restart and do not work across multiple instances.
-- The queue API and player API are unauthenticated, matching the pre-existing design: any client that knows a room code can add tracks or post playback state. `playNow` and the host-only "play now" button are UI-level permission, not server authorization.
+- Playback and `playNow` require a same-origin request and a room-scoped host capability. Ordinary queue adds and joining remain available to anyone with the code; this capability is not account authentication.
 - Existing global ESLint failures are documented separately in the handoff; avoid unrelated cleanup.
 
 ### Testing record
 
 | Scenario | Expected | Evidence/status |
 | --- | --- | --- |
-| Guest joins while host is playing | Same track/position; guest plays | Not tested in the mock session or checked-in tests. |
+| Guest joins while host is playing | Same track/position; guest plays | Local backend test and two-page browser check on 2026-11-27: both remained in-room, retained the same track and showed two members. Server anchor advanced; IFrame error 5 prevented verifying audio/guest audible position. |
 | Guest joins while host is paused | Same track/position; guest stays paused | Passed in a two-page browser test with a YouTube IFrame API test double: guest cued the track at 71s and remained paused. Real YouTube playback was blocked by IFrame error 5 in this environment. |
 | Host pause / resume | Guest seeks to authoritative seconds, then pauses/plays | Passed in the integrated browser on 2026-11-01 with real YouTube: guest froze at 4:40 on pause with room `isPlaying=false`, then advanced 4:40→4:42 on resume with the host also at 4:42. |
 | Host UI seek while playing / paused | Guest seeks; play state is preserved | Host UI seek not tested. Paused seek API + guest poll reconciliation passed with the test double at 45s, remaining paused. Not verified with real YouTube. |
@@ -118,6 +122,9 @@ Current visual source is `src/app/globals.css`: cream `#f7f3e7`, ink `#080808`, 
 | Guest refresh / reconnect | Latest HTTP room snapshot is applied | Not tested. |
 | Multiple guests | Every guest follows the same revision | Not tested. |
 | Stale or delayed updates | Lower revisions are ignored | Not directly tested. |
+| Transient room GET failure | Keep room open and retry | Live browser test on 2026-11-27: injected `500` retained the host route and polling recovered; injected `404` redirected home. |
+| Duplicate Next command | One logical command advances once | Passed in the backend regression suite: a retried command ID advances once; different payload reuse is rejected. |
+| Socket room bootstrap | Current state on connect/reconnect | `JOIN_ROOM` did not send a snapshot; current guest bootstrap depends on HTTP GET. |
 | Search: title / artist / keywords | Results with thumbnail, channel, duration | Passed against the local mock API (`search-api-test.js`, 23 checks): 200, six playable results, relevance order, metadata, duration labels, embeddable/live filtering. |
 | Search: caching and rate limit | Repeated query cached; 31st request/minute 429 | Passed: upstream called once per query, cached responses flagged, per-IP 30/min limit enforced. |
 | Search: error mapping | 429 quota, 503 missing config, 502 upstream, 400 bad query | Passed against mock responses; missing-key 503 also verified with a real restart without `YOUTUBE_API_KEY` (route returned 503 `not_configured`; UI showed the configuration message with a Try again action). |
@@ -127,9 +134,9 @@ Current visual source is `src/app/globals.css`: cream `#f7f3e7`, ink `#080808`, 
 | Queue socket propagation | `QUEUE_UPDATE` + `PLAYBACK_COMMAND` reach both roles | Passed (`queue-socket-test.js`, 35 checks): add/duplicate/append/playNow/direct URL/validation/snapshot, host and guest socket events. |
 | URL parsing | Supported formats only, strict 11-char IDs | Passed (`youtube-parse-test.mjs`, 21 checks). |
 
-Automated checks currently available: `npx tsc --noEmit`, `npm run build`, `npm run lint`, plus the three ad-hoc scripts listed above (they live outside the repo in the session temp directory; the repository has no test script). `test-results/.last-run.json` is the only file in `test-results` and does not identify a test case.
+Automated checks currently available: `npm run test:backend` (server must be running), `npx tsc --noEmit --incremental false`, `npm run build`, and `npm run lint`.
 
-Latest implementation checks completed before this documentation audit: `npx tsc --noEmit` passed; `npm run build` passed; `node --check server.js` passed. Scoped `npx eslint` over every file changed for music search reported no findings. Workspace `npm run lint` still fails on the pre-existing backlog (591 findings: 105 errors, 486 warnings — mostly legacy `HostPlayer`/`GuestPlayer` hooks/`any` issues and `tmp/` scripts). Real YouTube playback of the search-added tracks was observed in the integrated browser.
+Current room implementation checks: `npm run build`, TypeScript and targeted ESLint passed; `npm run test:backend` passed 5/5 live integration tests. Full-repository lint was not run. In this session, YouTube IFrame error `5` / `html5.missingapi` prevented audio verification; earlier successful browser playback observations are historical and do not substitute for testing the current runtime/browser combination.
 
 ### Development and change constraints
 
@@ -724,14 +731,12 @@ npm run lint    # ESLint
 
 **Next recommended steps:**
 
-1. Inspect `git status --short` and preserve existing dirty/untracked work (landing + search + queue changes are all uncommitted).
-2. With a real `YOUTUBE_API_KEY` in `.env.local`, re-run the search UI against the live API and confirm quota/error behavior.
-3. Run `npm run dev`, then perform real host/guest browser tests with YouTube playback enabled for the untested sync scenarios.
-4. Capture client-side diagnostic timestamps and compare them with server `seq`/revision events; do not infer playback timing from HTTP logs alone.
-5. Fix only confirmed synchronization defects, then update the scenario matrix here and in `Amply_Backend_Implementation.md`.
-6. Continue visual work against `sync research/Amply_UI_UX_Design_Notes.md`; record implementation differences in `DESIGN.md`.
+1. Confirm production platform, exact start command, process count and restart history before rollout. Current in-memory rooms do not survive restart or work across instances.
+2. Run an actual Chrome/Edge host + guest test with working YouTube codecs; record API, socket, IFrame `PLAYING`, and audible timing separately. Local playback failed with IFrame error `5` / `html5.missingapi`.
+3. If production is multi-instance, serverless, or requires room recovery across restarts, select a shared-state/realtime architecture based on that evidence; do not add Redis speculatively.
+4. Continue visual work against `sync research/Amply_UI_UX_Design_Notes.md`; record implementation differences in `DESIGN.md`.
 
-**Commands:** `npm run dev` starts the custom Next.js + Socket.IO server. Validate with `npx tsc --noEmit` and `npm run build`. `npm run lint` currently has a substantial existing error backlog (591 findings; changed files are lint-clean). There is no `npm test` script; ad-hoc integration scripts live in the session temp dir (`search-api-test.js`, `queue-socket-test.js`, `youtube-parse-test.mjs`, `mock-youtube.js`). `npm run start` uses `next start`, not the Socket.IO custom server.
+**Commands:** `npm run dev` starts the custom development server; `npm run build` then `npm start` starts the custom production server. `npm run test:backend` requires that server to be running at `http://localhost:3000`. `npx tsc --noEmit --incremental false` and targeted ESLint passed for the implementation; the full repository lint backlog was not run or addressed.
 
 **Do not change without a task-specific reason:** Host remains the playback authority; guests do not get playback controls. Preserve the shared queue, `playNow`/duplicate behavior, current Next/Previous behavior, YouTube IFrame ID extraction, room revision handling and approved v1.0 visual direction. Do not change `RoomScreen` composition, `VinylRecord`, `PlaybackOrbit`, track metadata or queue layout as part of a playback-only fix. Keep the search API server-side (never expose `YOUTUBE_API_KEY` to the client). Do not add a new clock architecture, Redis or dependencies without explicit scope.
 

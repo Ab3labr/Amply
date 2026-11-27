@@ -1,26 +1,34 @@
 import { NextResponse } from "next/server";
-import { roomsStore } from "@/lib/store";
+import { getRoom, normalizeRoomCode } from "@/lib/room-service";
+import { toRoomSnapshot } from "@/lib/store";
 
 type Params = Promise<{ code: string }>;
 
+export const runtime = "nodejs";
+
 export async function GET(
-  request: Request,
+  _request: Request,
   segmentData: { params: Params }
 ) {
-  const params = await segmentData.params;
-  const code = params.code.toUpperCase();
-  const room = roomsStore.get(code);
-
-  if (!room) {
-    return NextResponse.json({ error: "Room does not exist" }, { status: 404 });
+  const { code: rawCode } = await segmentData.params;
+  const code = normalizeRoomCode(rawCode);
+  if (!/^[A-Z0-9]{6}$/.test(code)) {
+    return NextResponse.json(
+      { error: "Room does not exist.", code: "room_not_found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } }
+    );
   }
 
-  room.positionSeconds ??= 0;
-  room.currentTrackId ??= room.queue[room.currentSongIndex]?.id ?? null;
+  const room = getRoom(code);
+  if (!room) {
+    return NextResponse.json(
+      { error: "Room does not exist.", code: "room_not_found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } }
+    );
+  }
 
-  // Update lastActivity on room access
   room.lastActivity = Date.now();
-  roomsStore.set(code, room);
-
-  return NextResponse.json(room);
+  return NextResponse.json(toRoomSnapshot(room), {
+    headers: { "Cache-Control": "no-store" },
+  });
 }
